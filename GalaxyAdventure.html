@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Galaxy Adventure</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Segoe UI', sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        #ui-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            z-index: 10;
+            pointer-events: none;
+        }
+        h1 {
+            margin: 0;
+            font-size: 24px;
+            text-shadow: 0 0 10px #00ffff;
+        }
+        #score-board {
+            font-size: 20px;
+            margin-top: 5px;
+            color: #ffeb3b;
+        }
+        #controls-hint {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 14px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 8px;
+            pointer-events: none;
+        }
+        #game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            text-align: center;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 40px;
+            border-radius: 20px;
+            border: 2px solid #ffeb3b;
+            display: none;
+            z-index: 20;
+        }
+        button {
+            background: #e91e63;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 18px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: transform 0.1s;
+        }
+        button:hover {
+            transform: scale(1.05);
+            background: #ff4081;
+        }
+        /* Loading overlay */
+        #loader {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 100;
+            transition: opacity 0.5s;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="loader">Loading Galaxy Engine...</div>
+
+    <div id="ui-container">
+        <h1>GALAXY ADVENTURE</h1>
+        <div id="score-board">★ スター: 0 / 10</div>
+    </div>
+
+    <div id="controls-hint">
+        移動: 矢印キー または WASD<br>
+        ジャンプ: SPACE<br>
+        カメラ回転: Q / E
+    </div>
+
+    <div id="game-over">
+        <h2 id="result-title">クリア！</h2>
+        <p id="result-msg">すべてのスターを集めました！</p>
+        <button onclick="location.reload()">もう一度遊ぶ</button>
+    </div>
+
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        // --- 設定 ---
+        const WORLD_RADIUS = 40;
+        const GRAVITY = 0.5;
+        const JUMP_FORCE = 8;
+        const SPEED = 0.5;
+        const ENEMY_COUNT = 8;
+        const STAR_COUNT = 10;
+
+        let scene, camera, renderer;
+        let player, planet;
+        let keys = {};
+        let velocity = new THREE.Vector3();
+        let isJumping = false;
+        let score = 0;
+        let stars = [];
+        let enemies = [];
+        let particles = [];
+        let cameraAngle = 0; // カメラの水平回転角度
+        let gameActive = true;
+        let clock = new THREE.Clock();
+
+        // 初期化
+        function init() {
+            // シーン
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x050510);
+            scene.fog = new THREE.FogExp2(0x050510, 0.008);
+
+            // カメラ
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            // レンダラー
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // ライト
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(50, 100, 50);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+
+            // 背景の星屑
+            addStarField();
+
+            // 惑星の生成
+            createPlanet();
+
+            // プレイヤーの生成
+            createPlayer();
+
+            // オブジェクト配置
+            spawnObjects();
+
+            // イベントリスナー
+            window.addEventListener('resize', onWindowResize, false);
+            document.addEventListener('keydown', (e) => keys[e.code] = true);
+            document.addEventListener('keyup', (e) => keys[e.code] = false);
+
+            // ローダーを消す
+            setTimeout(() => {
+                document.getElementById('loader').style.opacity = 0;
+                setTimeout(() => document.getElementById('loader').remove(), 500);
+                animate();
+            }, 1000);
+        }
+
+        function createPlanet() {
+            // 惑星の本体
+            const geometry = new THREE.SphereGeometry(WORLD_RADIUS, 64, 64);
+            
+            // マテリアル（草のようなテクスチャ感をノイズで表現したいが、ここでは頂点カラーで簡易表現）
+            const material = new THREE.MeshStandardMaterial({ 
+                color: 0x4caf50,
+                roughness: 0.8,
+                metalness: 0.1,
+                flatShading: false
+            });
+
+            planet = new THREE.Mesh(geometry, material);
+            planet.receiveShadow = true;
+            scene.add(planet);
+
+            // 惑星の雰囲気を出すための装飾（低ポリゴンの岩や木）
+            for(let i=0; i<30; i++) {
+                const size = Math.random() * 2 + 1;
+                const geo = new THREE.DodecahedronGeometry(size, 0);
+                const mat = new THREE.MeshStandardMaterial({ color: 0x5d4037 });
+                const rock = new THREE.Mesh(geo, mat);
+                
+                placeOnSphere(rock, WORLD_RADIUS - 0.5); // 少し埋める
+                rock.castShadow = true;
+                rock.receiveShadow = true;
+                planet.add(rock); // 惑星の子要素にする
+            }
+        }
+
+        function createPlayer() {
+            const group = new THREE.Group();
+
+            // 体 (修正: CapsuleGeometryはr137以降のため、CylinderGeometryで代用)
+            // 半径0.8, 上面半径0.8, 高さ2.0, 分割数16
+            const bodyGeo = new THREE.CylinderGeometry(0.8, 0.8, 2.0, 16);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0xff0000 }); // 赤い服
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 1.25;
+            body.castShadow = true;
+            group.add(body);
+
+            // 帽子
+            const hatGeo = new THREE.CylinderGeometry(1, 1, 0.2, 10);
+            const hatMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+            const hat = new THREE.Mesh(hatGeo, hatMat);
+            hat.position.y = 2.4;
+            group.add(hat);
+
+            // 顔（簡易）
+            const faceGeo = new THREE.SphereGeometry(0.7, 16, 16);
+            const faceMat = new THREE.MeshStandardMaterial({ color: 0xffcc80 }); // 肌色
+            const face = new THREE.Mesh(faceGeo, faceMat);
+            face.position.y = 2.0;
+            group.add(face);
+
+            player = group;
+            
+            // 初期位置（惑星の頂点）
+            player.position.set(0, WORLD_RADIUS, 0);
+            scene.add(player);
+        }
+
+        function spawnObjects() {
+            // スター（収集アイテム）
+            const starGeo = new THREE.OctahedronGeometry(1.5, 0);
+            const starMat = new THREE.MeshPhongMaterial({ 
+                color: 0xffeb3b, 
+                emissive: 0xffa000,
+                emissiveIntensity: 0.5,
+                shininess: 100
+            });
+
+            for (let i = 0; i < STAR_COUNT; i++) {
+                const star = new THREE.Mesh(starGeo, starMat);
+                placeOnSphereRandomly(star, WORLD_RADIUS + 1.5);
+                star.userData = { type: 'star', id: i, rotationSpeed: Math.random() * 0.05 + 0.02 };
+                scene.add(star);
+                stars.push(star);
+            }
+
+            // 敵（トゲトゲ）
+            const enemyGeo = new THREE.ConeGeometry(1, 2, 8);
+            const enemyMat = new THREE.MeshStandardMaterial({ color: 0x8d6e63 });
+            
+            for (let i = 0; i < ENEMY_COUNT; i++) {
+                const enemyGroup = new THREE.Group();
+                const mesh = new THREE.Mesh(enemyGeo, enemyMat);
+                mesh.position.y = 1;
+                mesh.castShadow = true;
+                enemyGroup.add(mesh);
+                
+                // 少し浮遊させる装飾
+                const ring = new THREE.Mesh(
+                    new THREE.TorusGeometry(0.6, 0.1, 4, 8),
+                    new THREE.MeshBasicMaterial({ color: 0xff5722 })
+                );
+                ring.position.y = 1.8;
+                ring.rotation.x = Math.PI / 2;
+                enemyGroup.add(ring);
+
+                placeOnSphereRandomly(enemyGroup, WORLD_RADIUS);
+                
+                // 敵の移動用データ
+                enemyGroup.userData = {
+                    axis: new THREE.Vector3(Math.random(), Math.random(), Math.random()).normalize(),
+                    speed: 0.005 + Math.random() * 0.01
+                };
+
+                scene.add(enemyGroup);
+                enemies.push(enemyGroup);
+            }
+        }
+
+        function addStarField() {
+            const starsGeometry = new THREE.BufferGeometry();
+            const starsMaterial = new THREE.PointsMaterial({color: 0xffffff, size: 0.5});
+            const starsVertices = [];
+            for(let i=0; i<2000; i++) {
+                const x = (Math.random() - 0.5) * 800;
+                const y = (Math.random() - 0.5) * 800;
+                const z = (Math.random() - 0.5) * 800;
+                // 中心付近には星を置かない
+                if (Math.abs(x) < 100 && Math.abs(y) < 100 && Math.abs(z) < 100) continue;
+                starsVertices.push(x, y, z);
+            }
+            starsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starsVertices, 3));
+            const starField = new THREE.Points(starsGeometry, starsMaterial);
+            scene.add(starField);
+        }
+
+        // 球面上にランダム配置するヘルパー関数
+        function placeOnSphereRandomly(obj, radius) {
+            const phi = Math.acos(-1 + (2 * Math.random()));
+            const theta = Math.sqrt(Math.PI * 20) * phi;
+            
+            const x = radius * Math.cos(theta) * Math.sin(phi);
+            const y = radius * Math.sin(theta) * Math.sin(phi);
+            const z = radius * Math.cos(phi);
+
+            obj.position.set(x, y, z);
+            
+            // 惑星の中心からオブジェクトに向かうベクトル（法線）
+            const normal = obj.position.clone().normalize();
+            // その方向を向くクォータニオンを作成（Y軸がUp）
+            const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+            obj.setRotationFromQuaternion(quaternion);
+        }
+
+        // 指定位置に配置するヘルパー
+        function placeOnSphere(obj, radius) {
+            // 親（planet）に追加する場合はローカル座標での配置になるので注意
+            // ここではランダムな回転を与えて配置
+            const axis = new THREE.Vector3(Math.random(), Math.random(), Math.random()).normalize();
+            const angle = Math.random() * Math.PI * 2;
+            
+            const pos = new THREE.Vector3(0, radius, 0);
+            pos.applyAxisAngle(axis, angle);
+            
+            obj.position.copy(pos);
+            const normal = pos.clone().normalize();
+            obj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+        }
+
+        // --- ゲームループ ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (!gameActive) return;
+
+            const delta = clock.getDelta();
+
+            updatePlayer(delta);
+            updateCamera();
+            updateEnemies(delta);
+            updateStars(delta);
+            updateParticles();
+
+            renderer.render(scene, camera);
+        }
+
+        function updatePlayer(delta) {
+            // 1. 重力方向（惑星中心 -> プレイヤー）
+            const playerPos = player.position.clone();
+            const planetCenter = new THREE.Vector3(0, 0, 0);
+            const upVector = playerPos.clone().sub(planetCenter).normalize();
+
+            // 2. 入力処理
+            const moveDir = new THREE.Vector3(0, 0, 0);
+            if (keys['ArrowUp'] || keys['KeyW']) moveDir.z -= 1;
+            if (keys['ArrowDown'] || keys['KeyS']) moveDir.z += 1;
+            if (keys['ArrowLeft'] || keys['KeyA']) moveDir.x -= 1;
+            if (keys['ArrowRight'] || keys['KeyD']) moveDir.x += 1;
+
+            // ジャンプ
+            if ((keys['Space'] || keys['Numpad0']) && !isJumping) {
+                velocity.y = JUMP_FORCE;
+                isJumping = true;
+                // 少しパーティクルを出す
+                createExplosion(player.position, 0xffffff, 5);
+            }
+
+            // カメラ回転
+            if (keys['KeyQ']) cameraAngle += 2 * delta;
+            if (keys['KeyE']) cameraAngle -= 2 * delta;
+
+            // 3. 移動ベクトルの計算（カメラ基準）
+            // カメラの向きを取得し、惑星の法線を除外して接平面成分のみにする
+            
+            // プレイヤーの現在の姿勢（クォータニオン）
+            const playerQuat = player.quaternion.clone();
+            
+            // カメラの方向を計算（Y軸回転のみ考慮）
+            // 実際にはカメラはプレイヤーを追従しているので、カメラの「前」は
+            // プレイヤーから見たカメラの逆方向ではない。
+            // 簡易的に、カメラのローカル座標系ではなく、
+            // 「プレイヤーの現在の接平面」上で、「カメラの視線方向」を基準に前後左右を決める。
+
+            // プレイヤーの真上ベクトル
+            const normal = upVector.clone();
+            
+            // カメラの位置からプレイヤーへのベクトル
+            const camToPlayer = player.position.clone().sub(camera.position).normalize();
+            
+            // カメラの「右」ベクトル = camToPlayer x normal
+            const camRight = new THREE.Vector3().crossVectors(camToPlayer, normal).normalize();
+            
+            // カメラの「前」ベクトル = normal x camRight
+            const camForward = new THREE.Vector3().crossVectors(normal, camRight).normalize();
+
+            // 入力に基づき移動方向決定
+            const targetMove = new THREE.Vector3()
+                .addScaledVector(camForward, -moveDir.z)
+                .addScaledVector(camRight, moveDir.x);
+
+            if (targetMove.length() > 0) {
+                targetMove.normalize().multiplyScalar(SPEED);
+                
+                // 現在の位置ベクトルに移動ベクトルを足して、新しい位置の候補を計算
+                // 球面上での移動は、実際には回転（AxisAngle）で行うのが正しいが、
+                // 微小移動なら接線方向に移動して正規化（normalize）すれば近似できる。
+                const nextPos = player.position.clone().add(targetMove);
+                
+                // 半径に合わせて補正（Y軸ジャンプは別途管理）
+                // ジャンプ中の高さ（現在のradius）を維持しつつ方向を変えるイメージだが、
+                // ここでは単純化して、「現在の高度 + ジャンプ変位」で管理する。
+                
+                // 移動成分をプレイヤー位置に加算
+                // ただし、これだと「空間」を移動してしまう。
+                // プレイヤーの新しい「方向」ベクトルを計算
+                const nextDir = nextPos.clone().normalize();
+                
+                // 高度管理
+                let currentHeight = player.position.length();
+                
+                // ジャンプ物理
+                if (isJumping) {
+                    velocity.y -= GRAVITY;
+                    currentHeight += velocity.y * delta * 5; // スケール調整
+                    
+                    if (currentHeight <= WORLD_RADIUS) {
+                        currentHeight = WORLD_RADIUS;
+                        isJumping = false;
+                        velocity.y = 0;
+                    }
+                } else {
+                    currentHeight = WORLD_RADIUS;
+                }
+
+                // 位置更新
+                player.position.copy(nextDir.multiplyScalar(currentHeight));
+
+                // プレイヤーの回転：進行方向を向く
+                // まずUpベクトルを法線に合わせる
+                const targetUp = nextDir.clone();
+                const orientQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), targetUp);
+                
+                // 次に、進行方向（moveDirのワールド変換版）を向くようにY軸回転させる
+                // これは少し複雑なので、モデル自体を回転させる簡易実装にする
+                
+                // モデルの向き：移動方向を向かせたい
+                // lookAtを使うとupベクトルが干渉するので、クォータニオン合成を使う
+                // 簡易実装：モデルの子要素を回転させるか、移動方向に合わせてquaternionをSlerpする
+                
+                player.quaternion.slerp(orientQuat, 0.2);
+                
+            } else {
+                // 移動していない時も重力方向（法線）に合わせる
+                const targetUp = upVector.clone();
+                const orientQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), targetUp);
+                player.quaternion.slerp(orientQuat, 0.2);
+                
+                // ジャンプ中の高度処理のみ（移動なし）
+                if (isJumping) {
+                    let currentHeight = player.position.length();
+                    velocity.y -= GRAVITY;
+                    currentHeight += velocity.y * delta * 5;
+                    
+                    if (currentHeight <= WORLD_RADIUS) {
+                        currentHeight = WORLD_RADIUS;
+                        isJumping = false;
+                        velocity.y = 0;
+                    }
+                    
+                    player.position.normalize().multiplyScalar(currentHeight);
+                }
+            }
+        }
+
+        function updateCamera() {
+            // カメラはプレイヤーの背後上空に配置
+            // プレイヤーの真上ベクトル
+            const up = player.position.clone().normalize();
+            
+            // カメラのオフセット計算
+            // 現在の「後ろ」方向を知るために、少し計算が必要だが、
+            // 単純にプレイヤーの位置を少し遅れて追従するダミーを使う手が一般的。
+            // ここでは、球面上での座標変換を行う。
+            
+            // 基本位置：プレイヤー位置から法線方向に20、Z軸方向に-30ずらす（ローカル）的な発想
+            // しかし球体なので、極座標的に考える。
+            
+            // 簡易実装：
+            // カメラ位置 = プレイヤー位置 + (法線 * 高さ) + (法線と直交するベクトル * 距離)
+            // 直交ベクトルは「前のフレームのカメラ位置」を使って推測し、スムーズに追従させる。
+
+            const camDist = 25;
+            const camHeight = 15;
+            
+            // 理想的なカメラ位置を計算
+            // プレイヤーの真上ベクトル
+            const pNormal = player.position.clone().normalize();
+            
+            // 現在のカメラ位置からプレイヤーへのベクトル
+            const camToP = player.position.clone().sub(camera.position);
+            // そのベクトルを接平面に投影して「後ろ」方向を決める
+            const forward = camToP.clone().sub(pNormal.clone().multiplyScalar(camToP.dot(pNormal))).normalize();
+            
+            // もしforwardがゼロ（真上にいる等）なら適当な軸を使う
+            if (forward.lengthSq() < 0.001) forward.set(1,0,0);
+
+            // 目標位置：プレイヤーから、forwardの逆方向にcamDist、normal方向にcamHeight
+            const targetPos = player.position.clone()
+                .add(forward.clone().multiplyScalar(-camDist))
+                .add(pNormal.clone().multiplyScalar(camHeight));
+            
+            // カメラのスムーズ移動
+            camera.position.lerp(targetPos, 0.1);
+            
+            // カメラのUpベクトルを惑星の法線に合わせる（これが重要）
+            // これをしないとカメラが天地逆転して酔う
+            const currentCamUp = camera.up.clone();
+            const targetCamUp = pNormal;
+            
+            camera.up.lerp(targetCamUp, 0.1);
+            camera.lookAt(player.position);
+        }
+
+        function updateEnemies(delta) {
+            enemies.forEach(group => {
+                // 惑星表面を回転移動
+                const axis = group.userData.axis;
+                const angle = group.userData.speed;
+                
+                // 位置ベクトルを軸周りに回転
+                group.position.applyAxisAngle(axis, angle);
+                
+                // 回転を法線に合わせる
+                const normal = group.position.clone().normalize();
+                const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+                group.setRotationFromQuaternion(q);
+
+                // 衝突判定
+                if (group.position.distanceTo(player.position) < 2.5) {
+                    gameOver(false);
+                }
+            });
+        }
+
+        function updateStars(delta) {
+            // 削除フラグ管理が面倒なので、逆ループ推奨だが簡略化
+            for (let i = stars.length - 1; i >= 0; i--) {
+                const star = stars[i];
+                // 自転
+                star.rotation.y += star.userData.rotationSpeed;
+                star.rotation.z += star.userData.rotationSpeed;
+
+                // 衝突判定
+                if (star.position.distanceTo(player.position) < 3.0) {
+                    // ゲット！
+                    createExplosion(star.position, 0xffeb3b, 10);
+                    scene.remove(star);
+                    stars.splice(i, 1);
+                    score++;
+                    document.getElementById('score-board').textContent = `★ スター: ${score} / ${STAR_COUNT}`;
+                    
+                    // 色変化演出
+                    player.children[0].material.emissive.setHex(0xffff00);
+                    setTimeout(() => {
+                        if(player) player.children[0].material.emissive.setHex(0x000000);
+                    }, 200);
+
+                    if (score >= STAR_COUNT) {
+                        gameOver(true);
+                    }
+                }
+            }
+        }
+
+        function createExplosion(pos, color, count) {
+            const geometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+            const material = new THREE.MeshBasicMaterial({ color: color });
+            
+            for (let i = 0; i < count; i++) {
+                const particle = new THREE.Mesh(geometry, material);
+                particle.position.copy(pos);
+                
+                // ランダムな方向に飛ばす
+                particle.userData = {
+                    vel: new THREE.Vector3(
+                        (Math.random() - 0.5) * 1,
+                        (Math.random() - 0.5) * 1,
+                        (Math.random() - 0.5) * 1
+                    ).normalize().multiplyScalar(0.5 + Math.random()),
+                    life: 1.0
+                };
+                
+                scene.add(particle);
+                particles.push(particle);
+            }
+        }
+
+        function updateParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.position.add(p.userData.vel);
+                p.userData.life -= 0.02;
+                p.scale.setScalar(p.userData.life);
+                p.rotation.x += 0.1;
+                
+                if (p.userData.life <= 0) {
+                    scene.remove(p);
+                    particles.splice(i, 1);
+                }
+            }
+        }
+
+        function gameOver(success) {
+            gameActive = false;
+            const el = document.getElementById('game-over');
+            const title = document.getElementById('result-title');
+            const msg = document.getElementById('result-msg');
+            
+            el.style.display = 'block';
+            
+            if (success) {
+                title.textContent = "CONGRATULATIONS!";
+                title.style.color = "#ffeb3b";
+                msg.textContent = "全てのスターを集めました！";
+            } else {
+                title.textContent = "GAME OVER";
+                title.style.color = "#f44336";
+                msg.textContent = "敵に当たってしまいました...";
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // スタート
+        init();
+
+    </script>
+</body>
+</html>

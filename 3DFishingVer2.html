@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Pixel Fishing RPG DX+</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', Courier, monospace; user-select: none; touch-action: none; }
+        canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        .hud-text { color: white; font-size: 24px; text-shadow: 2px 2px 0px #000; font-weight: bold; }
+        
+        /* Title Screen */
+        #title-screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(to bottom, #000033, #000000); display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: auto; z-index: 100; }
+        .title-logo { font-size: 60px; color: #4deeea; text-shadow: 4px 4px 0 #000; margin-bottom: 40px; text-align: center; }
+        .mode-btn { width: 280px; padding: 20px; margin: 10px; font-size: 24px; font-weight: bold; font-family: inherit; cursor: pointer; border: 4px solid white; box-shadow: 4px 4px 0 #000; transition: transform 0.1s; }
+        .mode-btn:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 #000; }
+        .btn-free { background: #ffcc00; color: black; }
+        .btn-survival { background: #330000; color: #ff3333; border-color: #aa0000; }
+        .btn-survival:hover { background: #550000; }
+
+        /* HUD */
+        #level-container { position: absolute; top: 20px; left: 20px; width: 200px; pointer-events: auto; }
+        #xp-bar-bg { width: 100%; height: 10px; background: #333; border: 2px solid #fff; margin-top: 5px; }
+        #xp-bar-fill { width: 0%; height: 100%; background: #00ff00; transition: width 0.3s; }
+        #survival-hud { position: absolute; top: 20px; left: 20px; width: 250px; display: none; }
+        .surv-bar-box { margin-bottom: 10px; }
+        .surv-label { font-size: 16px; color: #fff; text-shadow: 1px 1px 0 #000; }
+        .surv-bar-bg { width: 100%; height: 15px; background: #222; border: 2px solid #fff; }
+        .surv-bar-fill { height: 100%; transition: width 0.2s; }
+        #hunger-fill { background: #ffaa00; width: 100%; }
+        #sanity-fill { background: #aa00aa; width: 100%; }
+        #day-display { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); font-size: 30px; color: #cc0000; display: none; font-weight: bold; text-shadow: 2px 2px 0 #000; }
+        
+        #right-panel { position: absolute; top: 20px; right: 20px; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; pointer-events: auto; }
+        .side-btn { background: #444; color: white; border: 2px solid #fff; padding: 5px 10px; font-size: 14px; width: 100px; box-shadow: 2px 2px 0 #000; cursor: pointer; text-align: center; }
+        .side-btn:hover { background: #666; }
+        .debug-toggle { display: flex; align-items: center; background: rgba(0,0,0,0.5); padding: 5px; border: 1px solid #555; margin-bottom: 5px; }
+        .switch-label { font-size: 12px; color: #aaa; margin-right: 5px; font-weight: bold; }
+        .switch { position: relative; display: inline-block; width: 30px; height: 16px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; }
+        .slider:before { position: absolute; content: ""; height: 10px; width: 10px; left: 3px; bottom: 3px; background-color: white; transition: .4s; }
+        input:checked + .slider { background-color: #2196F3; }
+        input:checked + .slider:before { transform: translateX(14px); }
+
+        /* Battle */
+        #battle-status { position: absolute; bottom: 230px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 600px; text-align: center; display: none; }
+        .battle-bar-container { width: 100%; height: 20px; background: #333; border: 2px solid white; margin-bottom: 5px; position: relative; }
+        .bar-label { position: absolute; left: 5px; top: -25px; color: white; font-size: 16px; font-weight: bold; text-shadow: 1px 1px 0 #000; }
+        #fish-hp-bar { width: 100%; height: 100%; background: #ff5555; transition: width 0.1s; }
+        #escape-bar { width: 0%; height: 100%; background: #5555ff; transition: width 0.1s; }
+        #rhythm-container { position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 600px; height: 100px; background: rgba(0, 0, 0, 0.6); border: 4px solid white; display: none; overflow: hidden; pointer-events: auto; }
+        #target-zone { position: absolute; left: 20px; top: 20px; width: 60px; height: 60px; border: 4px solid #ffff00; border-radius: 50%; box-sizing: border-box; background: rgba(255, 255, 0, 0.2); z-index: 10; }
+        .note { position: absolute; top: 25px; width: 50px; height: 50px; border-radius: 50%; border: 3px solid white; box-sizing: border-box; box-shadow: 2px 2px 0 #000; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 20px; color: white; }
+        .note.tap { background: #ff5555; }
+        .note.flick { background: #ffff00; border-radius: 10px; color: black; }
+        .note.action { background: #0088ff; border-radius: 0; }
+        .note.hold { background: #00ff00; border-radius: 10px; width: 100px; }
+        #action-btn { position: absolute; bottom: 20px; right: 20px; width: 100px; height: 100px; background: #0088ff; border: 4px solid white; border-radius: 50%; color: white; font-weight: bold; font-size: 20px; display: none; align-items: center; justify-content: center; pointer-events: auto; box-shadow: 4px 4px 0 #000; z-index: 50; }
+        #action-btn:active { transform: scale(0.95); background: #0066cc; }
+
+        /* General UI */
+        .hidden { display: none !important; }
+        #center-msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 100%; pointer-events: auto; max-height: 90vh; overflow-y: auto; z-index: 20; display: none; }
+        .map-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 20px; padding: 0 20px; }
+        .map-btn { background: #444; border: 2px solid #fff; color: white; padding: 15px; font-family: inherit; font-weight: bold; cursor: pointer; text-align: center; opacity: 0.6; transition: transform 0.1s; }
+        .map-btn.unlocked { background: #00aa00; opacity: 1; box-shadow: 4px 4px 0 #000; }
+        .map-btn.unlocked:hover { background: #00cc00; transform: translateY(-2px); }
+        .map-btn.locked { cursor: not-allowed; background: #333; color: #888; }
+        
+        /* Modals */
+        #fish-caught-modal, #tutorial-modal, #collection-modal, #survival-choice-modal, #game-over-modal, #shop-modal, #equip-modal { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; pointer-events: auto; z-index: 100; background: rgba(0,0,0,0.7); }
+        #modal-content { background: rgba(0,0,0,0.95); padding: 20px; border: 4px solid white; display: flex; flex-direction: column; align-items: center; min-width: 350px; max-width: 90%; max-height: 85vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: center; }
+        
+        /* Shop & Equip */
+        .shop-grid, .equip-grid { display: grid; grid-template-columns: 1fr; gap: 10px; width: 100%; margin-top: 10px; text-align: left; }
+        .shop-item, .equip-item { background: #222; border: 1px solid #555; padding: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .shop-item.owned { border-color: #00ff00; }
+        .equip-item.equipped { background: #004400; border-color: #00ff00; }
+        .item-info { flex-grow: 1; }
+        .item-name { font-weight: bold; color: white; }
+        .item-desc { font-size: 12px; color: #aaa; }
+        .buy-btn { background: #ffaa00; border: none; color: black; font-weight: bold; padding: 5px 10px; cursor: pointer; }
+        .buy-btn:disabled { background: #555; color: #888; cursor: not-allowed; }
+        .equip-btn { background: #444; border: 1px solid white; color: white; padding: 5px 10px; cursor: pointer; }
+
+        /* Tabs */
+        .tabs { display: flex; width: 100%; justify-content: space-around; margin-bottom: 10px; border-bottom: 2px solid #555; }
+        .tab-btn { background: none; border: none; color: #888; font-weight: bold; font-size: 18px; cursor: pointer; padding-bottom: 5px; font-family: inherit; }
+        .tab-btn.active { color: #fff; border-bottom: 4px solid #ffcc00; }
+
+        .collection-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 100%; margin-top: 10px; }
+        .collection-item { background: #222; border: 1px solid #555; padding: 10px; border-radius: 5px; display: flex; flex-direction: column; align-items: center; }
+        .col-icon { font-size: 30px; margin-bottom: 5px; } .col-name { font-size: 12px; color: #fff; font-weight: bold; } .col-count { font-size: 12px; color: #00ff00; } .unknown { color: #555; }
+
+        .pixel-btn { background: #ffcc00; border: 4px solid #fff; padding: 10px 20px; font-family: inherit; font-size: 20px; font-weight: bold; cursor: pointer; box-shadow: 4px 4px 0px #000; color: black; text-align: center; }
+        .pixel-btn:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0px #000; }
+        .choice-container { display: flex; gap: 20px; margin-top: 20px; } .choice-btn { padding: 20px; border: 4px solid white; font-weight: bold; cursor: pointer; color: white; width: 120px; } .btn-eat { background: #ffaa00; color: black; } .btn-offer { background: #aa00aa; }
+        
+        #jumpscare-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #220000; z-index: 999; display: none; align-items: center; justify-content: center; overflow: hidden; mix-blend-mode: hard-light; }
+        .scare-shape { width: 100%; height: 100%; background: radial-gradient(circle, transparent 10%, black 90%); display: flex; align-items: center; justify-content: center; }
+        .scare-face { font-size: 300px; color: red; animation: shake 0.05s infinite; text-shadow: 10px 0 0 black, -10px 0 0 blue; }
+        @keyframes shake { 0% { transform: translate(5px, 5px) scale(1.1); } 50% { transform: translate(-5px, -5px) scale(1.2); } 100% { transform: translate(5px, -5px) scale(1.1); } }
+        .hit-effect { position: absolute; color: #ffff00; font-weight: bold; font-size: 30px; pointer-events: none; animation: pop 0.5s forwards; text-shadow: 2px 2px 0 #000; }
+        @keyframes pop { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(2); opacity: 0; } }
+        .tutorial-row { display: flex; align-items: center; margin: 10px 0; width: 100%; text-align: left; }
+        .tut-icon { width: 40px; height: 40px; border: 2px solid white; margin-right: 15px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; color: white; }
+        .alert-icon { position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); font-size: 80px; color: red; text-shadow: 4px 4px 0 #fff; animation: bounce 0.2s infinite; }
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <div id="title-screen">
+        <div class="title-logo">🎣 3D PIXEL<br>FISHING</div>
+        <button class="mode-btn btn-free" onclick="initGame('FREE')">FREE MODE<br><span style="font-size:14px">Relax Fishing</span></button>
+        <button class="mode-btn btn-survival" onclick="initGame('SURVIVAL')">SURVIVAL MODE<br><span style="font-size:14px">Feed the Beast</span></button>
+    </div>
+    <div id="level-container"><div class="hud-text" style="font-size: 20px;">LV. <span id="level-display">1</span></div><div id="xp-bar-bg"><div id="xp-bar-fill"></div></div></div>
+    <div id="survival-hud">
+        <div class="surv-bar-box"><div class="surv-label">🍗 HUNGER</div><div class="surv-bar-bg"><div id="hunger-fill" class="surv-bar-fill"></div></div></div>
+        <div class="surv-bar-box"><div class="surv-label">👁️ SANITY</div><div class="surv-bar-bg"><div id="sanity-fill" class="surv-bar-fill"></div></div></div>
+    </div>
+    <div id="day-display" class="hud-text">DAY 1</div>
+    <div id="right-panel">
+        <div class="hud-text" id="score-box" style="color: #ffd700;">GOLD: <span id="score">0</span>G</div>
+        <div class="debug-toggle"><span class="switch-label">DEBUG</span><label class="switch"><input type="checkbox" id="debug-check" onchange="toggleDebug()"><span class="slider"></span></label></div>
+        <button class="side-btn" onclick="returnToTitle()">TITLE</button>
+        <button class="side-btn" id="map-menu-btn" onclick="showMapSelection()">MAP</button>
+        <button class="side-btn" id="shop-btn" onclick="showShop()">SHOP</button>
+        <button class="side-btn" id="equip-btn" onclick="showEquip()">EQUIP</button>
+        <button class="side-btn" onclick="showTutorial(false)">HELP</button>
+        <button class="side-btn" onclick="showCollection()">ZUKAN</button>
+    </div>
+    <div id="battle-status">
+        <div class="battle-bar-container"><span class="bar-label">FISH HP</span><div id="fish-hp-bar"></div></div>
+        <div class="battle-bar-container" style="margin-top: 25px;"><span class="bar-label">ESCAPE!</span><div id="escape-bar"></div></div>
+    </div>
+    <div id="rhythm-container"><div id="target-zone"></div></div>
+    <div id="action-btn">SPACE<br>ACTION</div>
+    <div id="center-msg">
+        <h1 class="hud-text" style="font-size: 36px; color: #4deeea; margin: 0;">SELECT MAP</h1>
+        <div id="map-selection">
+            <div class="map-grid">
+                <div class="map-btn unlocked" onclick="selectMap('pond')">🏞️ 池 (POND)<br><span style="font-size:12px">LV.1~</span></div>
+                <div id="btn-sea" class="map-btn locked" onclick="selectMap('sea')">🌊 海 (SEA)<br><span style="font-size:12px">LV.3~</span></div>
+                <div id="btn-lava" class="map-btn locked" onclick="selectMap('lava')">🌋 溶岩 (LAVA)<br><span style="font-size:12px">LV.5~</span></div>
+                <div id="btn-cloud" class="map-btn locked" onclick="selectMap('cloud')">☁️ 雲 (CLOUD)<br><span style="font-size:12px">LV.8~</span></div>
+                <div id="btn-space" class="map-btn locked" onclick="selectMap('space')">🌌 宇宙 (SPACE)<br><span style="font-size:12px">LV.10~</span></div>
+            </div>
+            <div id="map-lock-msg" class="hud-text" style="color: #ff5555; font-size: 14px; margin-top: 10px; height: 20px;"></div>
+        </div>
+        <div id="start-area" class="hidden" style="margin-top: 20px;">
+            <button id="start-btn" class="pixel-btn">START FISHING</button>
+            <button id="back-btn" class="pixel-btn" style="background:#888; transform:scale(0.8);" onclick="backToMap()">BACK</button>
+        </div>
+        <div id="status-text" class="hud-text" style="margin-top:20px; display:none;">WAITING...</div>
+    </div>
+    
+    <div id="tutorial-modal" class="hidden">
+        <div id="modal-content" style="text-align: left;">
+            <div class="hud-text" style="font-size: 24px; color: yellow; text-align: center; margin-bottom: 20px;">HOW TO PLAY</div>
+            <div class="tutorial-row"><div class="tut-icon" style="background: #ff5555; border-radius: 50%;">TAP</div><div class="hud-text" style="font-size: 16px;">TAP / CLICK</div></div>
+            <div class="tutorial-row"><div class="tut-icon" style="background: #00ff00; border-radius: 10px; width: 60px;">HOLD</div><div class="hud-text" style="font-size: 16px;">HOLD Button</div></div>
+            <div class="tutorial-row"><div class="tut-icon" style="background: #ffff00; color:black; border-radius: 10px;">FLICK</div><div class="hud-text" style="font-size: 16px;">FLICK Mouse</div></div>
+            <div class="tutorial-row"><div class="tut-icon" style="background: #0088ff; border-radius: 0;">ACT</div><div class="hud-text" style="font-size: 16px;">SPACE Key</div></div>
+            <button class="pixel-btn" style="margin-top: 20px; width: 100%;" onclick="closeTutorial()">CLOSE</button>
+        </div>
+    </div>
+    
+    <!-- Zukan Modal -->
+    <div id="collection-modal" class="hidden">
+        <div id="modal-content" style="width: 100%; max-width: 600px;">
+            <div class="hud-text" style="font-size: 24px; color: #4deeea; margin-bottom: 10px;">FISHING BOOK</div>
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchZukanTab('fish')">FISH</button>
+                <button class="tab-btn" onclick="switchZukanTab('gear')">GEAR</button>
+            </div>
+            <div id="collection-list" class="collection-grid"></div>
+            <button class="pixel-btn" style="margin-top: 20px; width: 50%;" onclick="closeCollection()">CLOSE</button>
+        </div>
+    </div>
+
+    <!-- Shop Modal -->
+    <div id="shop-modal" class="hidden">
+        <div id="modal-content" style="width: 100%; max-width: 500px;">
+            <div class="hud-text" style="font-size: 24px; color: #ffcc00; margin-bottom: 10px;">SHOP</div>
+            <div class="hud-text" style="font-size: 16px; margin-bottom: 10px;">GOLD: <span id="shop-gold">0</span></div>
+            <div id="shop-list" class="shop-grid"></div>
+            <button class="pixel-btn" style="margin-top: 20px; width: 50%;" onclick="closeShop()">CLOSE</button>
+        </div>
+    </div>
+
+    <!-- Equip Modal -->
+    <div id="equip-modal" class="hidden">
+        <div id="modal-content" style="width: 100%; max-width: 500px;">
+            <div class="hud-text" style="font-size: 24px; color: #fff; margin-bottom: 10px;">EQUIPMENT</div>
+            <div id="equip-list" class="equip-grid"></div>
+            <button class="pixel-btn" style="margin-top: 20px; width: 50%;" onclick="closeEquip()">CLOSE</button>
+        </div>
+    </div>
+
+    <div id="fish-caught-modal" class="hidden">
+        <div id="modal-content">
+            <div id="modal-title" class="hud-text" style="font-size: 30px; color: yellow;">CATCH!</div>
+            <div id="fish-name" class="hud-text" style="font-size: 60px; margin: 20px 0;">🐟</div>
+            <div id="fish-details" class="hud-text" style="font-size: 18px; color: #aaa;">Mackerel</div>
+            <div id="fish-score" class="hud-text" style="color: #ffd700; margin: 10px 0;">+100 G</div>
+            <div id="levelup-msg" class="hud-text hidden" style="color: #ff55ff; font-size: 24px; margin-top:10px;">LEVEL UP!</div>
+            <button class="pixel-btn" onclick="closeModal()">OK</button>
+        </div>
+    </div>
+    <div id="survival-choice-modal" class="hidden">
+        <div id="modal-content">
+            <div class="hud-text" style="font-size: 24px; color: red;">A CATCH...</div>
+            <div id="surv-fish-icon" class="hud-text" style="font-size: 60px; margin: 20px 0;">🐟</div>
+            <div class="hud-text" style="font-size: 16px; margin-bottom: 10px;">Choose your fate:</div>
+            <div class="choice-container">
+                <div class="choice-btn btn-eat" onclick="survivalAction('eat')">EAT<br><span style="font-size:12px">Hunger ++<br>Sanity --</span></div>
+                <div class="choice-btn btn-offer" onclick="survivalAction('offer')">OFFER<br><span style="font-size:12px">Sanity ++<br>Hunger --</span></div>
+            </div>
+        </div>
+    </div>
+    <div id="game-over-modal" class="hidden">
+        <div id="modal-content">
+            <div class="hud-text" style="font-size: 40px; color: red; font-weight:bold;">YOU DIED</div>
+            <div id="death-reason" class="hud-text" style="font-size: 20px; color: #aaa; margin: 20px 0;">Reason...</div>
+            <div id="final-days" class="hud-text" style="font-size: 24px; color: white;">Survived: 0 Days</div>
+            <button class="pixel-btn" style="margin-top: 30px;" onclick="returnToTitle()">TITLE</button>
+        </div>
+    </div>
+    <div id="jumpscare-overlay"><div class="scare-shape"><div class="scare-face">👁️</div></div></div>
+    <div id="alert-display" class="alert-icon hidden">!</div>
+</div>
+
+<script>
+    const PIXEL_resolution = 160;
+
+    // --- Data Definitions ---
+    const FISH_TYPES = [
+        { emoji: '🐟', name: 'Mackerel', price: 50, color: 0x88ccff, minLevel: 1, difficulty: 1, hp: 100, maps: ['pond', 'sea'] },
+        { emoji: '👢', name: 'Old Boot', price: 10, color: 0x4a3c31, minLevel: 1, difficulty: 1, hp: 50, maps: ['all'] },
+        { emoji: '🥫', name: 'Empty Can', price: 15, color: 0xff0000, minLevel: 1, difficulty: 1, hp: 60, maps: ['pond', 'sea'] },
+        { emoji: '🐸', name: 'Frog', price: 80, color: 0x00ff00, minLevel: 2, difficulty: 2, hp: 120, maps: ['pond'] },
+        { emoji: '🐢', name: 'Turtle', price: 120, color: 0x008800, minLevel: 2, difficulty: 2, hp: 150, maps: ['pond'] },
+        { emoji: '🐠', name: 'Tropical', price: 150, color: 0xffaa00, minLevel: 3, difficulty: 2, hp: 150, maps: ['sea', 'cloud'] },
+        { emoji: '🦀', name: 'Crab', price: 180, color: 0xff5555, minLevel: 3, difficulty: 2, hp: 180, maps: ['sea'] },
+        { emoji: '⚓', name: 'Anchor', price: 200, color: 0x555555, minLevel: 3, difficulty: 4, hp: 300, maps: ['sea'] },
+        { emoji: '🦑', name: 'Squid', price: 250, color: 0xffffff, minLevel: 3, difficulty: 3, hp: 200, maps: ['sea', 'space', 'survival'] },
+        { emoji: '🐋', name: 'Whale', price: 800, color: 0x3333ff, minLevel: 4, difficulty: 5, hp: 500, maps: ['sea'] },
+        { emoji: '🔥', name: 'Fire Fish', price: 400, color: 0xff0000, minLevel: 5, difficulty: 4, hp: 300, maps: ['lava'] },
+        { emoji: '🦴', name: 'Bone Fish', price: 300, color: 0xaaaaaa, minLevel: 5, difficulty: 3, hp: 250, maps: ['lava', 'space', 'survival'] },
+        { emoji: '💎', name: 'Obsidian', price: 500, color: 0x220044, minLevel: 6, difficulty: 3, hp: 400, maps: ['lava'] },
+        { emoji: '🐲', name: 'Fire Dragon', price: 1000, color: 0xff8800, minLevel: 7, difficulty: 6, hp: 600, maps: ['lava'] },
+        { emoji: '🎈', name: 'Balloon', price: 100, color: 0xff00ff, minLevel: 8, difficulty: 2, hp: 100, maps: ['cloud'] },
+        { emoji: '🕊️', name: 'Sky Ray', price: 600, color: 0xeeeeee, minLevel: 8, difficulty: 4, hp: 400, maps: ['cloud'] },
+        { emoji: '🦅', name: 'Sky Eagle', price: 700, color: 0x996633, minLevel: 9, difficulty: 5, hp: 500, maps: ['cloud'] },
+        { emoji: '👽', name: 'Alien', price: 1000, color: 0x00ff00, minLevel: 10, difficulty: 5, hp: 600, maps: ['space'] },
+        { emoji: '🛰️', name: 'Satellite', price: 1200, color: 0xcccccc, minLevel: 10, difficulty: 4, hp: 700, maps: ['space'] },
+        { emoji: '🦈', name: 'Star Shark', price: 1500, color: 0x0000aa, minLevel: 10, difficulty: 5, hp: 800, maps: ['space', 'sea'] },
+        { emoji: '🛸', name: 'UFO', price: 2000, color: 0xcccccc, minLevel: 11, difficulty: 6, hp: 900, maps: ['space'] },
+        { emoji: '👑', name: 'Cosmic King', price: 3000, color: 0xffd700, minLevel: 12, difficulty: 6, hp: 1000, maps: ['space'] },
+        { emoji: '👁️', name: 'Watcher', price: 666, color: 0xff0000, minLevel: 1, difficulty: 4, hp: 400, maps: ['survival'] }
+    ];
+
+    const GEAR_DATA = {
+        rods: [
+            { id: 'rod_basic', name: 'Basic Rod', price: 0, speed: 1.0, luck: 1.0, desc: '普通の釣り竿' },
+            { id: 'rod_good', name: 'Good Rod', price: 2000, speed: 0.9, luck: 1.2, desc: '少し良い竿。ノーツが少し遅くなる' },
+            { id: 'rod_master', name: 'Master Rod', price: 10000, speed: 0.7, luck: 1.5, desc: '達人の竿。釣りが簡単になる' },
+            { id: 'net_basic', name: 'Basic Net', price: 5000, speed: 1.2, luck: 1.0, count: 3, desc: '網。3匹まとめて捕れるが難しい' }
+        ],
+        lures: [
+            { id: 'lure_worm', name: 'Worm', price: 500, type: 'all', luck: 1.1, desc: '基本の餌。少し釣りやすい' },
+            { id: 'lure_shiny', name: 'Shiny Lure', price: 1500, type: 'sea', luck: 2.0, desc: '海で効果大' },
+            { id: 'lure_magma', name: 'Magma Bait', price: 1500, type: 'lava', luck: 2.0, desc: '溶岩で効果大' }
+        ]
+    };
+
+    // --- State ---
+    let playerGold = 0;
+    let playerInventory = {
+        rods: ['rod_basic'],
+        lures: [],
+        tools: []
+    };
+    let currentEquip = {
+        rod: GEAR_DATA.rods[0],
+        lure: null
+    };
+
+    // --- Audio ---
+    const AudioSys = {
+        ctx: null, masterGain: null, ambienceNodes: [],
+        init: function() {
+            if (!this.ctx) {
+                this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                this.masterGain = this.ctx.createGain(); this.masterGain.gain.value = 0.3;
+                this.masterGain.connect(this.ctx.destination);
+            }
+            if (this.ctx.state === 'suspended') this.ctx.resume();
+        },
+        createNoiseBuffer: function() {
+            if (!this.ctx) return null;
+            const bufferSize = this.ctx.sampleRate * 2; const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+            const data = buffer.getChannelData(0); for(let i=0; i<bufferSize; i++) data[i]=Math.random()*2-1; return buffer;
+        },
+        stopAmbience: function() { this.ambienceNodes?.forEach(n => { try{n.stop();n.disconnect();}catch(e){} }); this.ambienceNodes=[]; },
+        playAmbience: function(type, isSurvival) {
+            this.init(); this.stopAmbience();
+            const buffer = this.createNoiseBuffer(); if(!buffer) return;
+            const src = this.ctx.createBufferSource(); src.buffer = buffer; src.loop = true;
+            const gain = this.ctx.createGain();
+            const filter = this.ctx.createBiquadFilter();
+            
+            if (isSurvival) {
+                // Simplified survival ambience
+                const osc = this.ctx.createOscillator(); osc.frequency.value = 60;
+                gain.gain.value = 0.5;
+                osc.connect(gain); gain.connect(this.masterGain); osc.start();
+                this.ambienceNodes.push(osc);
+            } else {
+                // Map ambience
+                filter.type = 'lowpass'; filter.frequency.value = (type==='sea' ? 400 : 800);
+                gain.gain.value = 0.3;
+                src.connect(filter); filter.connect(gain); gain.connect(this.masterGain); src.start();
+                this.ambienceNodes.push(src);
+            }
+        },
+        playTone: function(f,t,d,v=0.1) {
+            if(!this.ctx)return; const o=this.ctx.createOscillator(); const g=this.ctx.createGain();
+            o.type=t; o.frequency.setValueAtTime(f,this.ctx.currentTime);
+            g.gain.setValueAtTime(v,this.ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.01,this.ctx.currentTime+d);
+            o.connect(g); g.connect(this.ctx.destination); o.start(); o.stop(this.ctx.currentTime+d);
+        },
+        playScream: function() { this.playTone(400,'sawtooth',1.0,0.5); },
+        playCast: function(){this.playTone(400,'triangle',0.3,0.1);},
+        playBite: function(){this.playTone(150,'square',0.2,0.2);},
+        playHit: function(){this.playTone(800,'square',0.1,0.1);},
+        playMiss: function(){this.playTone(100,'sawtooth',0.3,0.2);},
+        playFlick: function(){this.playTone(600,'sawtooth',0.15,0.1);},
+        playHold: function(){this.playTone(400,'sine',0.5,0.1);},
+        playAction: function(){this.playTone(1000,'square',0.2,0.15);},
+        playFanfare: function(){[523,659,783,1046].forEach((f,i)=>setTimeout(()=>this.playTone(f,'square',0.4,0.1),i*100));}
+    };
+
+    // --- Variables ---
+    let scene, camera, renderer, pixelScene, pixelCamera, pixelMaterial, renderTarget, clock = new THREE.Clock();
+    let waterMesh, rodGroup, bobberMesh, worldGroup = new THREE.Group();
+    let particles = [], confetti = [], ambientParticles = [], hallucinations = [];
+    
+    const STATE = { TITLE: -1, MENU: 0, IDLE: 1, CASTING: 2, WAITING: 3, BITING: 4, REELING: 5, CAUGHT: 6, GAME_OVER: 8 };
+    let gameState = STATE.TITLE;
+    let gameMode = 'FREE'; 
+    let playerLevel = 1, playerXP = 0, xpToNextLevel = 100, debugMode = false;
+    let caughtHistory = {};
+    let playerHunger = 100, beastSanity = 100, survivalDays = 1, dayTimer = 0;
+    const DAY_LENGTH = 60; 
+
+    const MAPS = {
+        pond:  { name: 'Pond',  level: 1, bg: 0x87CEEB, water: 0x006994, dock: 0x8B4513, fog: 0x87CEEB },
+        sea:   { name: 'Sea',   level: 3, bg: 0x1E90FF, water: 0x000080, dock: 0xC2B280, fog: 0x1E90FF },
+        lava:  { name: 'Lava',  level: 5, bg: 0x330000, water: 0xFF4500, dock: 0x222222, fog: 0x330000 },
+        cloud: { name: 'Cloud', level: 8, bg: 0xE0FFFF, water: 0xFFFFFF, dock: 0xFFD700, fog: 0xE0FFFF },
+        space: { name: 'Space', level: 10, bg: 0x000011, water: 0x4B0082, dock: 0x778899, fog: 0x000011 },
+        survival: { name: 'The Void', level: 1, bg: 0x050000, water: 0x220000, dock: 0x111111, fog: 0x110000 }
+    };
+    let currentMapKey = 'pond';
+    let biteTimer=0, bobberVelocity=new THREE.Vector3();
+    let battleFish=null, battleNotes=[], battleTime=0, nextNoteTime=0, fishHP=100, escapeProgress=0, noteSpeed=300;
+    let isHolding=false, mousePos={x:0,y:0}, lastMousePos={x:0,y:0}, flickVelocity=0, actionPressed=false;
+    let glitchIntensity=0.0;
+    let hasShownTutorial = false;
+
+    function createVoxel(color, x, y, z, size) {
+        const geo = new THREE.BoxGeometry(size, size, size); const mat = new THREE.MeshLambertMaterial({ color: color });
+        const mesh = new THREE.Mesh(geo, mat); mesh.position.set(x, y, z); return mesh;
+    }
+    
+    // Moved helper function to top level scope
+    function showHitEffect(t,c) { 
+        const d=document.createElement('div'); d.className='hit-effect'; d.innerText=t; d.style.color=c; d.style.left='30px'; d.style.top='-20px'; document.getElementById('rhythm-container').appendChild(d); setTimeout(()=>d.remove(),500); 
+    }
+
+    function createSplash(x, z) {
+        AudioSys.playTone(200, 'triangle', 0.1);
+        for(let i=0; i<8; i++) {
+            const p = createVoxel(0xffffff, x, 0.1, z, 0.1);
+            p.userData = { vy: Math.random() * 0.1 + 0.05, vx: (Math.random() - 0.5) * 0.1, vz: (Math.random() - 0.5) * 0.1, life: 1.0, type:'splash' };
+            worldGroup.add(p); particles.push(p);
+        }
+    }
+    function createConfetti() {
+        for(let i=0; i<30; i++) {
+            const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00]; const c = colors[Math.floor(Math.random()*colors.length)];
+            const p = createVoxel(c, 0, 3, 3, 0.1);
+            p.userData = { vy: Math.random()*0.2 + 0.1, vx: (Math.random()-0.5)*0.3, vz: (Math.random()-0.5)*0.3, life: 2.0, type:'confetti' };
+            worldGroup.add(p); confetti.push(p);
+        }
+    }
+    function buildWorld(mapKey) {
+        while(worldGroup.children.length > 0){ worldGroup.remove(worldGroup.children[0]); }
+        ambientParticles = []; hallucinations = [];
+        const mapConfig = MAPS[mapKey];
+        scene.background = new THREE.Color(mapConfig.bg); scene.fog = new THREE.Fog(mapConfig.fog, 20, 50);
+        const waterGeo = (mapKey==='pond') ? new THREE.CylinderGeometry(8,8,0.2,32) : new THREE.PlaneGeometry(100,100,20,20);
+        const waterMat = new THREE.MeshPhongMaterial({ color: mapConfig.water, flatShading: true, shininess: 50, emissive: (mapKey==='lava'||mapKey==='survival')?0x110000:0x000000 });
+        waterMesh = new THREE.Mesh(waterGeo, waterMat);
+        if(mapKey!=='pond') waterMesh.rotation.x = -Math.PI/2; worldGroup.add(waterMesh);
+        if (mapKey === 'pond') {
+            const ground = new THREE.Mesh(new THREE.CylinderGeometry(15,15,1,32), new THREE.MeshLambertMaterial({color:0x228B22}));
+            ground.position.y = -0.5; worldGroup.add(ground);
+            for(let i=0;i<5;i++){ worldGroup.add(createVoxel(0x00AA00, Math.random()*10-5, 0.15, Math.random()*10-5, 0.8)); }
+            for(let i=0;i<8;i++){ const a=(i/8)*Math.PI*2; const r=9; worldGroup.add(createVoxel(i%2==0?0x808080:0x006400, Math.cos(a)*r, 0.5, Math.sin(a)*r, 1.5)); }
+        } else if (mapKey === 'lava') {
+            const rock = createVoxel(0x222222, 0, 0, 3.5, 4); rock.scale.y=0.2; worldGroup.add(rock);
+            worldGroup.add(createVoxel(0x111111, -5, 1, -5, 2)); worldGroup.add(createVoxel(0x111111, 5, 2, -8, 3));
+        } else if (mapKey === 'cloud') {
+            const cloudP = createVoxel(0xFFFFFF, 0, 0.1, 3.5, 4); cloudP.scale.y=0.5; worldGroup.add(cloudP);
+            worldGroup.add(createVoxel(0xFFFFFF, -6, 2, -5, 3)); worldGroup.add(createVoxel(0xEEEEEE, 6, 3, -8, 4));
+        } else if (mapKey === 'space') {
+            const deck = createVoxel(0x555555, 0, -0.25, 6, 1); deck.scale.set(10, 0.5, 10); worldGroup.add(deck);
+            const planet = createVoxel(0xFFAA00, -20, 10, -40, 10); worldGroup.add(planet);
+            const stars = new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(3000).map(()=>(Math.random()-0.5)*200), 3)), new THREE.PointsMaterial({size:0.2,color:0xffffff}));
+            worldGroup.add(stars);
+        } else if (mapKey === 'survival') {
+            const rock = createVoxel(0x111111, 0, 0, 3.5, 4); rock.scale.y=0.2; worldGroup.add(rock);
+            for(let i=0;i<10;i++) { const d = createVoxel(0x330000, (Math.random()-0.5)*30, Math.random()*5, -10-Math.random()*20, 1); d.rotation.set(Math.random(),Math.random(),Math.random()); worldGroup.add(d); }
+        } else { 
+            const dockGroup = new THREE.Group();
+            for(let x=0;x<4;x++) for(let z=0;z<4;z++) { const plank=createVoxel(0x8B4513, x-1, 0.2, z+2, 1); plank.scale.set(0.95,0.2,0.95); dockGroup.add(plank); }
+            worldGroup.add(dockGroup);
+        }
+        rodGroup = new THREE.Group();
+        const rodMesh = createVoxel(0x654321, 0, 0, 0.5, 0.05); rodMesh.scale.set(1,1,20); rodMesh.rotateX(-0.3);
+        rodGroup.add(rodMesh); rodGroup.position.set(0.8, 1.0, 3.5); rodGroup.rotation.y = -0.2; worldGroup.add(rodGroup);
+        bobberMesh = createVoxel(0xffffff, 0, 0, 0, 0.15); 
+        const bobberRed = createVoxel(0xff0000, 0, 0.15/2, 0, 0.15); bobberRed.scale.set(1,0.5,1); bobberMesh.add(bobberRed); worldGroup.add(bobberMesh);
+        for(let i=0; i<30; i++) { const p = createVoxel(0xffffff, (Math.random()-0.5)*20, Math.random()*10, (Math.random()-0.5)*10+2, 0.1); p.userData = { vy: 0.02, type: 'ambient' }; worldGroup.add(p); ambientParticles.push(p); }
+        resetBobber();
+    }
+    function init() {
+        scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1000); camera.position.set(0, 2, 5); camera.lookAt(0,0,0);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6)); const dirLight = new THREE.DirectionalLight(0xffffff, 0.8); dirLight.position.set(10,20,10); dirLight.castShadow=true; scene.add(dirLight);
+        const resY = PIXEL_resolution; const resX = Math.round(resY * (window.innerWidth/window.innerHeight));
+        renderTarget = new THREE.WebGLRenderTarget(resX, resY, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+        pixelScene = new THREE.Scene(); pixelCamera = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+        pixelMaterial = new THREE.ShaderMaterial({
+            uniforms: { tDiffuse: { value: renderTarget.texture }, glitchStrength: { value: 0.0 }, hungerEffect: { value: 0.0 }, time: { value: 0.0 } },
+            vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+            fragmentShader: `uniform sampler2D tDiffuse; uniform float glitchStrength; uniform float hungerEffect; uniform float time; varying vec2 vUv; float rand(vec2 co){ return fract(sin(dot(co.xy ,vec2(12.9898,78.233))) * 43758.5453); } void main() { vec2 uv = vUv; if (glitchStrength > 0.0) { float shake = (rand(vec2(time, uv.y)) - 0.5) * glitchStrength * 0.1; uv.x += shake; float r = texture2D(tDiffuse, uv + vec2(glitchStrength * 0.02, 0.0)).r; float g = texture2D(tDiffuse, uv).g; float b = texture2D(tDiffuse, uv - vec2(glitchStrength * 0.02, 0.0)).b; if (rand(vec2(time * 10.0, floor(uv.y * 10.0))) < glitchStrength * 0.5) { r = 1.0 - r; g = 0.0; b = 0.0; } gl_FragColor = vec4(r, g, b, 1.0); } else { vec4 tex = texture2D(tDiffuse, uv); if (hungerEffect > 0.0) { float noise = rand(uv * time) * hungerEffect; float gray = dot(tex.rgb, vec3(0.299, 0.587, 0.114)); tex.rgb = mix(tex.rgb, vec3(gray), hungerEffect) + noise * 0.3; } gl_FragColor = tex; } }`
+        });
+        pixelQuad = new THREE.Mesh(new THREE.PlaneGeometry(2,2), pixelMaterial); pixelScene.add(pixelQuad); scene.add(worldGroup); buildWorld('pond');
+        renderer = new THREE.WebGLRenderer({ antialias: false }); renderer.setSize(window.innerWidth, window.innerHeight); document.body.appendChild(renderer.domElement);
+        window.addEventListener('resize', onWindowResize);
+        const inputHandler = (e) => {
+            AudioSys.init();
+            if (e.target.tagName==='BUTTON'||e.target.tagName==='INPUT'||e.target.closest('.mode-btn')||e.target.closest('#modal-content')||e.target.closest('.debug-toggle')) return;
+            if(gameState===STATE.REELING) e.preventDefault(); onInputStart(e);
+        };
+        const upHandler=(e)=>onInputEnd(e); const moveHandler=(e)=>{ let cx, cy; if(e.touches){cx=e.touches[0].clientX;cy=e.touches[0].clientY;}else{cx=e.clientX;cy=e.clientY;} const dx=cx-lastMousePos.x; const dy=cy-lastMousePos.y; flickVelocity=Math.sqrt(dx*dx+dy*dy); lastMousePos={x:cx,y:cy}; mousePos={x:cx,y:cy}; };
+        document.body.addEventListener('mousedown', inputHandler); document.body.addEventListener('touchstart', inputHandler, { passive: false });
+        document.body.addEventListener('mouseup', upHandler); document.body.addEventListener('touchend', upHandler);
+        document.body.addEventListener('mousemove', moveHandler); document.body.addEventListener('touchmove', moveHandler, { passive: false });
+        document.addEventListener('keydown', (e)=>{if(e.code==='Space'){actionPressed=true; if(gameState===STATE.REELING)checkRhythmInput('action');}}); document.addEventListener('keyup', (e)=>{if(e.code==='Space')actionPressed=false;});
+        const ab=document.getElementById('action-btn'); ab.addEventListener('touchstart',(e)=>{e.preventDefault();e.stopPropagation();if(gameState===STATE.REELING)checkRhythmInput('action');}); ab.addEventListener('mousedown',(e)=>{e.preventDefault();e.stopPropagation();if(gameState===STATE.REELING)checkRhythmInput('action');});
+        document.getElementById('start-btn').addEventListener('click', (e)=>{AudioSys.init();startFishingLoop();});
+    }
+
+    // --- Global Helper Functions for onclick ---
+    window.updateMapButtons = function() {
+        for(const [key, data] of Object.entries(MAPS)) {
+            const btn = document.getElementById(`btn-${key}`); if (!btn) continue;
+            if (debugMode || gameMode === 'SURVIVAL' || playerLevel >= data.level) { btn.classList.remove('locked'); btn.classList.add('unlocked'); }
+            else { btn.classList.remove('unlocked'); btn.classList.add('locked'); }
+        }
+    };
+    window.initGame = function(mode) {
+        AudioSys.init(); gameMode = mode;
+        document.getElementById('title-screen').style.display = 'none';
+        if (mode === 'SURVIVAL') {
+            document.getElementById('survival-hud').style.display = 'block'; document.getElementById('level-container').style.display = 'none'; document.getElementById('day-display').style.display = 'block';
+            document.getElementById('map-menu-btn').style.display = 'none'; document.getElementById('shop-btn').style.display = 'none'; document.getElementById('equip-btn').style.display = 'none';
+            playerHunger=100; beastSanity=100; survivalDays=1; dayTimer=0; score=0; selectMap('survival');
+        } else {
+            document.getElementById('survival-hud').style.display = 'none'; document.getElementById('level-container').style.display = 'block'; document.getElementById('day-display').style.display = 'none';
+            document.getElementById('map-menu-btn').style.display = 'inline-block'; document.getElementById('shop-btn').style.display = 'inline-block'; document.getElementById('equip-btn').style.display = 'inline-block';
+            showMapSelection();
+        }
+    };
+    window.returnToTitle = function() {
+        gameState=STATE.TITLE; AudioSys.stopAmbience();
+        document.getElementById('title-screen').style.display = 'flex'; document.getElementById('center-msg').style.display = 'none'; document.getElementById('map-selection').style.display = 'none'; document.getElementById('start-area').classList.add('hidden');
+        document.getElementById('game-over-modal').classList.add('hidden'); document.getElementById('survival-hud').style.display='none'; document.getElementById('day-display').style.display='none'; document.getElementById('jumpscare-overlay').style.display='none';
+        pixelMaterial.uniforms.glitchStrength.value=0; pixelMaterial.uniforms.hungerEffect.value=0;
+    };
+    window.toggleDebug = function() { debugMode = document.getElementById('debug-check').checked; window.updateMapButtons(); };
+    window.showMapSelection = function() { if(gameMode==='SURVIVAL')return; gameState=STATE.MENU; AudioSys.stopAmbience(); document.getElementById('center-msg').style.display='block'; document.getElementById('map-selection').style.display='block'; document.getElementById('start-area').classList.add('hidden'); window.updateMapButtons(); };
+    window.selectMap = function(mapKey) {
+        AudioSys.init(); AudioSys.playTone(400, 'sine', 0.1);
+        if(gameMode==='FREE' && !debugMode && playerLevel < MAPS[mapKey].level) { document.getElementById('map-lock-msg').innerText = `LOCKED! Requires Level ${MAPS[mapKey].level}`; return; }
+        currentMapKey = mapKey; document.getElementById('map-selection').style.display='none';
+        if(gameMode==='SURVIVAL'){ document.getElementById('center-msg').style.display='block'; document.getElementById('start-area').classList.remove('hidden'); document.getElementById('back-btn').style.display='none'; }
+        else { document.getElementById('start-area').classList.remove('hidden'); document.getElementById('map-lock-msg').innerText=""; document.getElementById('back-btn').style.display='inline-block'; }
+        buildWorld(mapKey); AudioSys.playAmbience(mapKey, gameMode==='SURVIVAL');
+    };
+    window.backToMap = function() { AudioSys.playTone(300,'sine',0.1); document.getElementById('start-area').classList.add('hidden'); document.getElementById('map-selection').style.display = 'block'; };
+    window.showTutorial=function(a=false){document.getElementById('tutorial-modal').classList.remove('hidden');if(a)document.querySelector('#tutorial-modal button').onclick=()=>window.closeTutorial(true);else document.querySelector('#tutorial-modal button').onclick=()=>document.getElementById('tutorial-modal').classList.add('hidden');};
+    window.closeTutorial=function(s=false){document.getElementById('tutorial-modal').classList.add('hidden');if(s)startBattleActual();};
+    
+    // --- Shop & Equip Functions ---
+    window.showShop = function() {
+        const list = document.getElementById('shop-list'); list.innerHTML = '';
+        document.getElementById('shop-gold').innerText = playerGold;
+        [...GEAR_DATA.rods, ...GEAR_DATA.lures].forEach(item => {
+            const isOwned = playerInventory.rods.includes(item.id) || playerInventory.lures.includes(item.id);
+            const div = document.createElement('div'); div.className = `shop-item ${isOwned?'owned':''}`;
+            div.innerHTML = `<div class="item-info"><div class="item-name">${item.name}</div><div class="item-desc">${item.desc}</div></div><button class="buy-btn" ${isOwned || playerGold < item.price ? 'disabled' : ''} onclick="buyItem('${item.id}', ${item.price})">${isOwned ? 'OWNED' : item.price + ' G'}</button>`;
+            list.appendChild(div);
+        });
+        document.getElementById('shop-modal').classList.remove('hidden');
+    };
+    window.buyItem = function(id, price) {
+        if(playerGold >= price) {
+            playerGold -= price;
+            if(id.startsWith('rod') || id.startsWith('net')) playerInventory.rods.push(id); else playerInventory.lures.push(id);
+            AudioSys.playFanfare();
+            window.showShop(); updateLevelUI();
+        }
+    };
+    window.closeShop = function() { document.getElementById('shop-modal').classList.add('hidden'); };
+
+    window.showEquip = function() {
+        const list = document.getElementById('equip-list'); list.innerHTML = '<div class="hud-text" style="font-size:16px;">RODS & NETS</div>';
+        playerInventory.rods.forEach(id => {
+            const item = GEAR_DATA.rods.find(r => r.id === id);
+            const isEq = currentEquip.rod.id === id;
+            const div = document.createElement('div'); div.className = `equip-item ${isEq?'equipped':''}`;
+            div.innerHTML = `<div class="item-info"><div class="item-name">${item.name}</div></div><button class="equip-btn" onclick="equipItem('rod', '${id}')">${isEq?'EQUIPPED':'EQUIP'}</button>`;
+            list.appendChild(div);
+        });
+        list.innerHTML += '<div class="hud-text" style="font-size:16px; margin-top:10px;">LURES</div>';
+        playerInventory.lures.forEach(id => {
+            const item = GEAR_DATA.lures.find(l => l.id === id);
+            const isEq = currentEquip.lure && currentEquip.lure.id === id;
+            const div = document.createElement('div'); div.className = `equip-item ${isEq?'equipped':''}`;
+            div.innerHTML = `<div class="item-info"><div class="item-name">${item.name}</div></div><button class="equip-btn" onclick="equipItem('lure', '${id}')">${isEq?'EQUIPPED':'EQUIP'}</button>`;
+            list.appendChild(div);
+        });
+        document.getElementById('equip-modal').classList.remove('hidden');
+    };
+    window.equipItem = function(type, id) {
+        if(type === 'rod') currentEquip.rod = GEAR_DATA.rods.find(r => r.id === id);
+        else currentEquip.lure = GEAR_DATA.lures.find(l => l.id === id);
+        window.showEquip();
+    };
+    window.closeEquip = function() { document.getElementById('equip-modal').classList.add('hidden'); };
+
+    // --- Zukan Functions ---
+    window.showCollection = function() { window.switchZukanTab('fish'); document.getElementById('collection-modal').classList.remove('hidden'); };
+    window.switchZukanTab = function(tab) {
+        const list = document.getElementById('collection-list'); list.innerHTML = '';
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        const tabBtns = document.querySelectorAll('.tab-btn');
+        if (tab === 'fish') {
+            tabBtns[0].classList.add('active');
+            FISH_TYPES.forEach(f => {
+                const c = caughtHistory[f.name] || 0; const i = document.createElement('div'); i.className = 'collection-item';
+                i.innerHTML = c>0 ? `<div class="col-icon" style="color:white;">${f.emoji}</div><div class="col-name">${f.name}</div><div class="col-count">x${c}</div>` : `<div class="col-icon unknown">?</div><div class="col-name unknown">???</div><div class="col-count">x0</div>`;
+                list.appendChild(i);
+            });
+        } else {
+            tabBtns[1].classList.add('active');
+            [...GEAR_DATA.rods, ...GEAR_DATA.lures].forEach(g => {
+                const owned = playerInventory.rods.includes(g.id) || playerInventory.lures.includes(g.id);
+                const i = document.createElement('div'); i.className = 'collection-item';
+                i.innerHTML = `<div class="col-icon" style="color:${owned?'white':'#555'};">🎣</div><div class="col-name" style="color:${owned?'white':'#555'};">${g.name}</div><div class="col-count">${owned?'OWNED':'???'}</div>`;
+                list.appendChild(i);
+            });
+        }
+    };
+    window.closeCollection = function() { document.getElementById('collection-modal').classList.add('hidden'); };
+
+    window.survivalAction = function(a) {
+        document.getElementById('survival-choice-modal').classList.add('hidden');
+        if (a==='eat') { playerHunger=Math.min(100,playerHunger+30); beastSanity-=10; updateStatus("Consumed."); }
+        else { beastSanity=Math.min(100,beastSanity+40); playerHunger-=5; updateStatus("Offered."); }
+        processResult('survival');
+    };
+    function processResult(m) {
+        if(gameState === STATE.IDLE) return;
+        
+        let count = currentEquip.rod.count || 1;
+        let earned = 0;
+        
+        for(let k=0; k<count; k++) {
+            if(!caughtHistory[battleFish.name]) caughtHistory[battleFish.name]=0; caughtHistory[battleFish.name]++;
+            earned += battleFish.price;
+        }
+
+        if(m==='free') {
+            playerGold += earned;
+            playerXP += battleFish.price;
+            if(playerXP>=xpToNextLevel) { playerLevel++; playerXP-=xpToNextLevel; xpToNextLevel*=1.5; window.updateMapButtons(); }
+            createConfetti(); AudioSys.playFanfare(); document.getElementById('fish-caught-modal').classList.remove('hidden');
+            document.getElementById('fish-name').innerText = (count > 1 ? `x${count} ` : '') + battleFish.emoji;
+            document.getElementById('fish-details').innerText = battleFish.name; 
+            document.getElementById('fish-score').innerText = `+${earned} G`;
+            const l=document.getElementById('levelup-msg'); if(playerXP>=xpToNextLevel){l.classList.remove('hidden');l.innerText=`LEVEL UP! -> ${playerLevel}`;}else l.classList.add('hidden');
+        } 
+        resetGameSequence(); updateLevelUI();
+    }
+    function updateLevelUI() { document.getElementById('score').innerText=playerGold; document.getElementById('level-display').innerText=playerLevel; document.getElementById('xp-bar-fill').style.width=(playerXP/xpToNextLevel)*100+'%'; }
+    window.closeModal = function() { document.getElementById('fish-caught-modal').classList.add('hidden'); };
+    function resetGameSequence() { resetBobber(); gameState=STATE.IDLE; document.getElementById('alert-display').classList.add('hidden'); updateStatus("CLICK TO CAST"); }
+    function updateStatus(t) { const e=document.getElementById('status-text'); e.style.display='block'; e.innerText=t; if(t==="TOO EARLY!"||t==="ESCAPED!")setTimeout(()=>{if(gameState===STATE.IDLE)updateStatus("CLICK TO CAST");},1000); }
+    function startFishingLoop() { gameState = STATE.IDLE; document.getElementById('center-msg').style.display = 'none'; updateStatus("CLICK TO CAST"); }
+    function onInputStart(e) {
+        if(gameState===STATE.IDLE) castBobber();
+        else if(gameState===STATE.WAITING) { updateStatus("TOO EARLY!"); AudioSys.playMiss(); resetGameSequence(); }
+        else if(gameState===STATE.BITING) startBattle();
+        else if(gameState===STATE.REELING) { isHolding=true; checkRhythmInput('tap'); }
+    }
+    function onInputEnd() { if(gameState===STATE.REELING && isHolding) { isHolding=false; checkRhythmInput('hold_end'); } }
+    function castBobber() {
+        AudioSys.playCast(); gameState=STATE.CASTING; bobberMesh.visible=true; bobberMesh.position.set(0.9, 2.5, 4.0);
+        bobberVelocity.set(((Math.random()-0.5)*4 - bobberMesh.position.x)/30, 0.3, (-2-Math.random()*4 - bobberMesh.position.z)/30);
+        updateStatus("..."); rodGroup.rotation.x = -0.1; setTimeout(() => rodGroup.rotation.x = -0.3, 200);
+    }
+    function determineFish() {
+        const available = FISH_TYPES.filter(f => {
+            const mapOK = f.maps.includes('all') || f.maps.includes(currentMapKey);
+            const levelOK = (gameMode==='SURVIVAL' || f.minLevel<=playerLevel);
+            return mapOK && levelOK;
+        });
+        const luck = currentEquip.rod.luck * (currentEquip.lure ? currentEquip.lure.luck : 1.0);
+        let index = Math.floor(Math.random() * available.length);
+        if (luck > 1.2 && Math.random() > 0.5) index = Math.min(available.length - 1, index + 1);
+        return available[index] || FISH_TYPES[0];
+    }
+    function startBattle() {
+        AudioSys.playBite(); battleFish = determineFish();
+        if (!hasShownTutorial) { hasShownTutorial = true; showTutorial(true); return; }
+        startBattleActual();
+    }
+    function startBattleActual() {
+        gameState=STATE.REELING; document.getElementById('alert-display').classList.add('hidden');
+        document.getElementById('rhythm-container').style.display='block'; document.getElementById('battle-status').style.display='block';
+        document.getElementById('action-btn').style.display='flex'; updateStatus("BATTLE START!");
+        fishHP=battleFish.hp; escapeProgress=0; battleTime=0; nextNoteTime=0; battleNotes=[]; glitchIntensity=0;
+        document.querySelectorAll('.note').forEach(n=>n.remove()); 
+        let diffMult = battleFish.difficulty;
+        if(currentEquip.rod.speed < 1.0) diffMult *= currentEquip.rod.speed;
+        if(currentEquip.rod.id.includes('net')) diffMult *= 1.2;
+        noteSpeed = 200 + (diffMult * 50); updateBattleUI();
+    }
+    function endBattle(success) {
+        if(gameState !== STATE.REELING) return;
+        document.getElementById('rhythm-container').style.display='none'; document.getElementById('battle-status').style.display='none';
+        document.getElementById('action-btn').style.display='none';
+        if (success) { 
+            gameState = STATE.CAUGHT;
+            if(gameMode==='SURVIVAL') { document.getElementById('survival-choice-modal').classList.remove('hidden'); document.getElementById('surv-fish-icon').innerText = battleFish.emoji; } 
+            else processResult('free'); 
+        }
+        else { AudioSys.playMiss(); updateStatus("ESCAPED!"); setTimeout(resetGameSequence,1500); }
+    }
+    function updateRhythmGame(dt) {
+        battleTime+=dt; if(glitchIntensity>0) glitchIntensity -= dt*2; if(glitchIntensity<0) glitchIntensity=0;
+        let baseGlitch = (gameMode==='SURVIVAL' && playerHunger<50) ? (50-playerHunger)*0.005 : 0; pixelMaterial.uniforms.glitchStrength.value = Math.max(baseGlitch, glitchIntensity);
+        if (battleTime > nextNoteTime) {
+            const r=Math.random(), c=document.getElementById('rhythm-container'), w=c.offsetWidth;
+            let type='tap'; if(r>0.7)type='flick'; if(r>0.85)type='action'; if(r>0.92)type='hold';
+            const el=document.createElement('div'); el.className=`note ${type}`; el.style.left=w+'px';
+            if(type==='flick')el.innerText='>>>'; if(type==='action')el.innerText='!'; if(type==='hold')el.innerText='HOLD';
+            c.appendChild(el); battleNotes.push({el:el, x:w, type:type, hit:false});
+            nextNoteTime=battleTime + Math.max(0.4, 1.5-(battleFish.difficulty*0.15*currentEquip.rod.speed)) + Math.random()*0.2;
+        }
+        for(let i=battleNotes.length-1; i>=0; i--) {
+            let n = battleNotes[i]; n.x-=noteSpeed*dt; n.el.style.left=n.x+'px';
+            if(n.type==='flick' && !n.hit && Math.abs(n.x+25-50)<40 && flickVelocity>10) hitNote(i);
+            if(n.x<-60) { AudioSys.playMiss(); showHitEffect("MISS","red"); escapeProgress+=15; glitchIntensity=1.0; n.el.remove(); battleNotes.splice(i,1); }
+        }
+        updateBattleUI(); if(fishHP<=0) endBattle(true); else if(escapeProgress>=100) endBattle(false);
+    }
+    function hitNote(i) { battleNotes[i].el.remove(); battleNotes.splice(i,1); fishHP-=20; showHitEffect("HIT!","#ffff00"); const n=battleNotes[i]; if(n && n.type==='action')AudioSys.playAction(); else AudioSys.playHit(); rodGroup.rotation.x=-0.1; setTimeout(()=>rodGroup.rotation.x=-0.3,100); }
+    function checkRhythmInput(type) {
+        for(let i=0; i<battleNotes.length; i++) {
+            const n=battleNotes[i], center=n.x+(n.type==='hold'?60:25);
+            if(Math.abs(center-50)<50) {
+                if((n.type===type) || (n.type==='hold' && type==='tap')) {
+                    if(n.type==='hold' && type==='tap') { AudioSys.playHold(); return; }
+                    hitNote(i); break;
+                }
+            }
+        }
+    }
+    function updateBattleUI() {
+        const maxHP = battleFish ? battleFish.hp : 100;
+        document.getElementById('fish-hp-bar').style.width = Math.max(0, (fishHP / maxHP) * 100) + '%';
+        document.getElementById('escape-bar').style.width = Math.min(100, escapeProgress) + '%';
+    }
+    function resetBobber() { bobberMesh.position.set(0.9, 1.8, 4.0); bobberMesh.visible = false; }
+    function onWindowResize() { const a=window.innerWidth/window.innerHeight; camera.aspect=a; camera.updateProjectionMatrix(); const y=PIXEL_resolution; const x=Math.round(y*a); renderTarget.setSize(x,y); renderer.setSize(window.innerWidth,window.innerHeight); }
+
+    function animate() {
+        requestAnimationFrame(animate); const dt = clock.getDelta(); const time = clock.getElapsedTime(); pixelMaterial.uniforms.time.value = time;
+        if(gameMode==='SURVIVAL' && gameState!==STATE.GAME_OVER && gameState!==STATE.TITLE) {
+            dayTimer+=dt; playerHunger-=dt*0.5; beastSanity-=dt*0.8;
+            if(dayTimer>DAY_LENGTH) { dayTimer=0; survivalDays++; beastSanity-=5; updateStatus(`DAY ${survivalDays}...`); }
+            document.getElementById('hunger-fill').style.width=playerHunger+'%'; document.getElementById('sanity-fill').style.width=beastSanity+'%'; document.getElementById('day-display').innerText=`DAY ${survivalDays}`;
+            pixelMaterial.uniforms.hungerEffect.value = (100-playerHunger)/100 * 0.8;
+            if(beastSanity<50 && Math.random()<0.01) { const h=createVoxel(0x000000,(Math.random()-0.5)*10,2+Math.random()*3,3,0.5+Math.random()); h.userData={life:0.5}; worldGroup.add(h); hallucinations.push(h); }
+            if(beastSanity<20 && Math.random()<0.05) { pixelMaterial.uniforms.glitchStrength.value=0.5; setTimeout(()=>pixelMaterial.uniforms.glitchStrength.value=0,100); }
+            if(playerHunger<=0) triggerGameOver("STARVED TO DEATH"); else if(beastSanity<=0) triggerGameOver("CONSUMED BY THE VOID");
+        }
+        if(waterMesh) {
+            if(currentMapKey==='pond') waterMesh.position.y=Math.sin(time)*0.05;
+            else { const pos=waterMesh.geometry.attributes.position; for(let i=0;i<pos.count;i++) pos.setZ(i, Math.sin(pos.getX(i)*0.5+time*2)*0.2); pos.needsUpdate=true; }
+        }
+        if (gameState === STATE.CASTING) {
+            bobberMesh.position.add(bobberVelocity); bobberVelocity.y -= 0.015;
+            if (bobberMesh.position.y <= 0) { bobberMesh.position.y = 0; createSplash(bobberMesh.position.x, bobberMesh.position.z); gameState = STATE.WAITING; biteTimer = time + 1 + Math.random() * 3; }
+        } else if (gameState === STATE.WAITING) {
+            bobberMesh.position.y = Math.sin(time * 5) * 0.05;
+            if (time > biteTimer) { gameState = STATE.BITING; document.getElementById('alert-display').classList.remove('hidden'); AudioSys.playTone(300, 'square', 0.05); setTimeout(() => { if (gameState === STATE.BITING) { gameState = STATE.IDLE; document.getElementById('alert-display').classList.add('hidden'); updateStatus("ESCAPED!"); AudioSys.playMiss(); resetGameSequence(); } }, 800); }
+        } else if (gameState === STATE.BITING) bobberMesh.position.y = -0.2 + Math.sin(time * 20) * 0.1;
+        else if (gameState === STATE.REELING) { bobberMesh.position.y = Math.sin(time * 15) * 0.05; updateRhythmGame(dt); }
+        [...particles, ...confetti, ...ambientParticles, ...hallucinations].forEach(p => {
+            if(p.userData.type==='ambient') { p.position.y += p.userData.vy * Math.sin(time+p.position.x); }
+            else if(hallucinations.includes(p)) { p.userData.life-=dt; p.rotation.x+=dt; p.scale.setScalar(p.userData.life); if(p.userData.life<=0){worldGroup.remove(p);hallucinations.splice(hallucinations.indexOf(p),1);} }
+            else { p.position.y+=p.userData.vy; p.position.x+=p.userData.vx; p.position.z+=p.userData.vz; p.userData.vy-=0.01; p.userData.life-=0.05; p.scale.setScalar(p.userData.life*(p.userData.type==='confetti'?0.2:0.1)); if(p.userData.life<=0){worldGroup.remove(p);if(p.userData.type==='confetti')confetti.splice(confetti.indexOf(p),1);else particles.splice(particles.indexOf(p),1);} }
+        });
+        if(rodGroup) rodGroup.position.y=1.0+Math.sin(time*2)*0.02;
+        renderer.setRenderTarget(renderTarget); renderer.render(scene, camera); renderer.setRenderTarget(null); renderer.render(pixelScene, pixelCamera);
+    }
+    function triggerGameOver(r) {
+        gameState=STATE.GAME_OVER; AudioSys.playScream(); document.getElementById('jumpscare-overlay').style.display='flex'; pixelMaterial.uniforms.glitchStrength.value=1.0;
+        setTimeout(()=>{document.getElementById('jumpscare-overlay').style.display='none'; document.getElementById('game-over-modal').classList.remove('hidden'); document.getElementById('death-reason').innerText=r; document.getElementById('final-days').innerText=`Survived: ${survivalDays} Days`; pixelMaterial.uniforms.glitchStrength.value=0;},2000);
+    }
+    init(); animate();
+</script>
+</body>
+</html>

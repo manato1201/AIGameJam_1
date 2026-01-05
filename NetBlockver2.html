@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ネットワーク対戦ブロック崩し</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { touch-action: none; overscroll-behavior: none; }
+        canvas { box-shadow: 0 0 20px rgba(0, 255, 255, 0.2); }
+        .glass { background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); }
+    </style>
+</head>
+<body class="bg-slate-900 text-white h-screen w-screen overflow-hidden flex flex-col items-center justify-center font-sans">
+
+    <!-- UI Layer -->
+    <div id="ui-layer" class="absolute inset-0 z-10 flex flex-col items-center justify-center pointer-events-none">
+        
+        <!-- Main Menu -->
+        <div id="menu-screen" class="glass p-8 rounded-xl shadow-2xl text-center pointer-events-auto transition-all duration-300">
+            <h1 class="text-4xl font-bold mb-2 text-cyan-400 tracking-wider">NEON BATTLE</h1>
+            <p class="text-sm text-slate-400 mb-6">対戦型ネットワークブロック崩し</p>
+            
+            <div class="space-y-4">
+                <button onclick="createGame()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 px-6 rounded-lg transition shadow-lg shadow-cyan-500/30">
+                    部屋を作る (ホスト)
+                </button>
+                
+                <div class="flex space-x-2">
+                    <input type="text" id="join-code-input" placeholder="IDを入力" maxlength="4" class="bg-slate-800 border border-slate-600 rounded-lg px-4 py-2 text-center text-xl tracking-widest uppercase w-32 focus:outline-none focus:border-cyan-400">
+                    <button onclick="joinGame()" class="flex-1 bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-lg transition shadow-lg shadow-purple-500/30">
+                        参加 (ゲスト)
+                    </button>
+                </div>
+            </div>
+            <p id="menu-error" class="text-red-400 text-xs mt-4 h-4"></p>
+            <!-- ローカル用ヒント -->
+            <p class="text-xs text-slate-500 mt-4">
+                ※ローカルで動かない場合は<br>コード内のfirebaseConfigを設定してください
+            </p>
+        </div>
+
+        <!-- Waiting Screen -->
+        <div id="waiting-screen" class="hidden glass p-8 rounded-xl text-center pointer-events-auto">
+            <h2 class="text-2xl font-bold mb-4">対戦待ち...</h2>
+            <div class="mb-6">
+                <p class="text-sm text-slate-400">ルームID (相手に伝えてください)</p>
+                <div class="flex items-center justify-center space-x-2 mt-2">
+                    <span id="room-id-display" class="text-5xl font-mono font-bold text-yellow-400 tracking-widest select-all">----</span>
+                    <button onclick="copyRoomId()" class="bg-slate-700 hover:bg-slate-600 p-2 rounded text-xs">コピー</button>
+                </div>
+            </div>
+            <div class="animate-pulse text-cyan-300 text-sm">対戦相手の接続を待機中...</div>
+            <button onclick="resetGame()" class="mt-8 text-slate-400 hover:text-white text-sm underline">キャンセル</button>
+        </div>
+
+        <!-- Result Screen -->
+        <div id="result-screen" class="hidden glass p-8 rounded-xl text-center pointer-events-auto">
+            <h2 id="result-title" class="text-4xl font-bold mb-4">WIN!</h2>
+            <p id="result-message" class="text-lg mb-6">相手が切断しました</p>
+            <button onclick="resetGame()" class="bg-white text-slate-900 font-bold py-2 px-6 rounded-full hover:bg-slate-200 transition">
+                タイトルへ戻る
+            </button>
+        </div>
+    </div>
+
+    <!-- Game HUD -->
+    <div id="game-hud" class="absolute top-0 w-full p-4 flex justify-between items-start pointer-events-none hidden z-0">
+        <div class="flex flex-col items-center">
+            <span class="text-xs text-purple-400 uppercase font-bold">Player 2 (Top)</span>
+            <span id="score-p2" class="text-4xl font-mono font-bold text-white opacity-80">0</span>
+        </div>
+        
+        <div class="mt-2 text-center">
+             <div class="px-3 py-1 bg-slate-800 rounded-full border border-slate-700">
+                <span id="room-display-hud" class="text-xs text-slate-500 font-mono">ID: ----</span>
+            </div>
+             <!-- メッセージ表示エリア -->
+             <div id="game-message" class="mt-2 text-yellow-400 font-bold text-sm animate-pulse"></div>
+        </div>
+
+        <div class="flex flex-col items-center">
+            <span class="text-xs text-cyan-400 uppercase font-bold">Player 1 (Bottom)</span>
+            <span id="score-p1" class="text-4xl font-mono font-bold text-white opacity-80">0</span>
+        </div>
+    </div>
+
+    <!-- Canvas -->
+    <canvas id="gameCanvas" class="hidden bg-slate-800 rounded-lg shadow-inner"></canvas>
+
+    <!-- Firebase Scripts -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, updateDoc, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Configuration ---
+        
+        // ★★★ ローカルで遊ぶ場合は、ここにFirebaseコンソールから取得した設定値を貼り付けてください ★★★
+        // 値はすべてダブルクォーテーション " " で囲ってください。
+        const localFirebaseConfig = {
+            apiKey: "AIzaSyAA0lye9_nnpT6L1Ava3m2xYy_3_fcKs6g",
+            authDomain: "testnetblock-b1724.firebaseapp.com",
+            projectId: "testnetblock-b1724",
+            storageBucket: "testnetblock-b1724.firebasestorage.app",
+            messagingSenderId: "714916097850",
+            appId: "1:714916097850:web:23af4193b1afddb82e6a03"
+        };
+
+        // --- 以下は変更しなくて大丈夫です ---
+        
+        let app, auth, db;
+        let userId = null;
+        let appId = 'default-app-id';
+
+        // Global Game State
+        let gameId = null;
+        let isHost = false;
+        let unsubscribeGame = null;
+        let lastSyncTime = 0;
+        
+        // Physics & Rendering Constants
+        const CANVAS_WIDTH = 400;
+        const CANVAS_HEIGHT = 600;
+        const PADDLE_WIDTH = 80;
+        const PADDLE_HEIGHT = 12;
+        const BALL_RADIUS = 6;
+        const BLOCK_ROWS = 5;
+        const BLOCK_COLS = 5;
+        const WIN_SCORE = 5;
+
+        // Local State
+        let gameState = {
+            status: 'menu', // menu, waiting, playing, finished
+            ball: { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2, vx: 0, vy: 0 },
+            p1X: CANVAS_WIDTH / 2, // Host (Bottom)
+            p2X: CANVAS_WIDTH / 2, // Guest (Top)
+            blocks: [], // Array of {x, y, active}
+            scores: { p1: 0, p2: 0 },
+            winner: null,
+            servingPlayer: null, // 'p1' or 'p2'
+            waitingForServe: true // true: サーブ待ち（停止中）
+        };
+
+        let canvas, ctx;
+
+        // --- Initialization ---
+
+        async function init() {
+            try {
+                let configToUse = null;
+
+                // 1. 環境変数をチェック (Artifacts環境)
+                if (typeof __firebase_config !== 'undefined') {
+                    configToUse = JSON.parse(__firebase_config);
+                    appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                } 
+                // 2. ローカル設定をチェック (apiKeyが入っているか確認)
+                else if (localFirebaseConfig.apiKey && localFirebaseConfig.apiKey !== "") {
+                    configToUse = localFirebaseConfig;
+                    appId = 'local-game'; // ローカル用のID
+                }
+
+                if (!configToUse) {
+                    console.error("Firebase config not found.");
+                    document.getElementById('menu-error').innerHTML = "設定エラー: Firebase設定が見つかりません。<br>コード内のlocalFirebaseConfigを編集してください。";
+                    return;
+                }
+
+                app = initializeApp(configToUse);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                // Auth
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log("Logged in:", userId);
+                    }
+                });
+
+                setupCanvas();
+                setupInput();
+                requestAnimationFrame(gameLoop);
+
+            } catch (e) {
+                console.error("Init Error:", e);
+                document.getElementById('menu-error').innerText = "初期化エラー: 設定を確認してください (" + e.message + ")";
+            }
+        }
+
+        function setupCanvas() {
+            canvas = document.getElementById('gameCanvas');
+            ctx = canvas.getContext('2d');
+            
+            // Resize handling logic for responsiveness
+            const resize = () => {
+                const aspect = CANVAS_WIDTH / CANVAS_HEIGHT;
+                let w = window.innerWidth;
+                let h = window.innerHeight;
+                
+                if (w / h > aspect) {
+                    w = h * aspect;
+                } else {
+                    h = w / aspect;
+                }
+                
+                // Keep some padding
+                w *= 0.95;
+                h *= 0.95;
+
+                canvas.width = CANVAS_WIDTH;
+                canvas.height = CANVAS_HEIGHT;
+                canvas.style.width = `${w}px`;
+                canvas.style.height = `${h}px`;
+            };
+            
+            window.addEventListener('resize', resize);
+            resize();
+        }
+
+        // --- Game Logic ---
+
+        window.createGame = async () => {
+            if (!userId) return;
+            const code = Math.floor(1000 + Math.random() * 9000).toString(); // 4 digit code
+            const blocks = generateBlocks();
+            const initialServer = Math.random() > 0.5 ? 'p1' : 'p2'; // ランダムで先攻決定
+
+            const initialData = {
+                hostId: userId,
+                guestId: null,
+                status: 'waiting',
+                lastUpdate: serverTimestamp(),
+                ball: { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2, vx: 0, vy: 0 }, // 停止状態で開始
+                p1X: CANVAS_WIDTH / 2,
+                p2X: CANVAS_WIDTH / 2,
+                scores: { p1: 0, p2: 0 },
+                blocks: blocks,
+                servingPlayer: initialServer,
+                waitingForServe: true
+            };
+
+            try {
+                // Use public collection with correct path structure (even number of segments)
+                // path: artifacts/{appId}/public/data/games/{code}
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'games', code), initialData);
+                gameId = code;
+                isHost = true;
+                gameState.blocks = blocks; // Local init
+                gameState.servingPlayer = initialServer;
+                gameState.waitingForServe = true;
+                
+                switchScreen('waiting');
+                document.getElementById('room-id-display').innerText = code;
+                document.getElementById('room-display-hud').innerText = `ID: ${code}`;
+                subscribeToGame(code);
+            } catch (e) {
+                console.error(e);
+                document.getElementById('menu-error').innerText = "作成に失敗しました: DB権限などを確認してください";
+            }
+        };
+
+        window.joinGame = async () => {
+            if (!userId) return;
+            const code = document.getElementById('join-code-input').value.trim();
+            if (code.length !== 4) {
+                document.getElementById('menu-error').innerText = "4桁のIDを入力してください";
+                return;
+            }
+
+            // Correct path: artifacts/{appId}/public/data/games/{code}
+            const gameRef = doc(db, 'artifacts', appId, 'public', 'data', 'games', code);
+            
+            try {
+                const docSnap = await getDoc(gameRef);
+                if (!docSnap.exists()) {
+                    document.getElementById('menu-error').innerText = "部屋が見つかりません";
+                    return;
+                }
+                
+                const data = docSnap.data();
+                if (data.status !== 'waiting' && data.guestId !== userId) {
+                    document.getElementById('menu-error').innerText = "この部屋は満員または開始済みです";
+                    return;
+                }
+
+                // Join
+                await updateDoc(gameRef, {
+                    guestId: userId,
+                    status: 'playing' // Start immediately upon join
+                });
+
+                gameId = code;
+                isHost = false;
+                switchScreen('playing');
+                document.getElementById('room-display-hud').innerText = `ID: ${code}`;
+                subscribeToGame(code);
+            } catch (e) {
+                console.error(e);
+                document.getElementById('menu-error').innerText = "参加エラー";
+            }
+        };
+
+        function subscribeToGame(code) {
+            if (unsubscribeGame) unsubscribeGame();
+
+            // Correct path: artifacts/{appId}/public/data/games/{code}
+            unsubscribeGame = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'games', code), (docSnap) => {
+                if (!docSnap.exists()) {
+                    // Game deleted
+                    resetGame();
+                    return;
+                }
+
+                const data = docSnap.data();
+
+                // State machine based on DB updates
+                if (isHost) {
+                    if (data.status === 'playing' && gameState.status === 'menu') {
+                        // Guest joined
+                        switchScreen('playing');
+                    }
+                    // Host reads Guest's paddle
+                    if (data.guestId) {
+                        gameState.p2X = data.p2X;
+                    }
+                    
+                    // ゲストがサーブした（waitingForServeをfalseにした）場合、それを受け取る
+                    if (data.waitingForServe === false && gameState.waitingForServe === true && data.servingPlayer === 'p2') {
+                         gameState.waitingForServe = false;
+                         gameState.ball = data.ball; // 速度ベクトルを受け取る
+                    }
+
+                } else {
+                    // Guest reads Host's Ball, Blocks, and P1 Paddle
+                    gameState.p1X = data.p1X;
+                    gameState.scores = data.scores;
+                    gameState.servingPlayer = data.servingPlayer;
+                    gameState.waitingForServe = data.waitingForServe;
+                    
+                    // Simple Lerp for ball to reduce stutter
+                    const lerpFactor = 0.3;
+                    gameState.ball.x += (data.ball.x - gameState.ball.x) * lerpFactor;
+                    gameState.ball.y += (data.ball.y - gameState.ball.y) * lerpFactor;
+                    // For velocity, just take it
+                    gameState.ball.vx = data.ball.vx;
+                    gameState.ball.vy = data.ball.vy;
+                    
+                    gameState.blocks = data.blocks;
+                }
+                
+                // Update UI scores
+                document.getElementById('score-p1').innerText = data.scores.p1;
+                document.getElementById('score-p2').innerText = data.scores.p2;
+
+                // Update Message UI
+                updateGameMessage();
+
+                // Check win condition from DB
+                if (data.scores.p1 >= WIN_SCORE || data.scores.p2 >= WIN_SCORE) {
+                    endGame(data.scores.p1 >= WIN_SCORE ? 'Host' : 'Guest');
+                }
+            }, (error) => {
+                console.error("Sync error:", error);
+            });
+        }
+
+        function updateGameMessage() {
+            const msgEl = document.getElementById('game-message');
+            if (gameState.waitingForServe) {
+                const isMyServe = (isHost && gameState.servingPlayer === 'p1') || (!isHost && gameState.servingPlayer === 'p2');
+                if (isMyServe) {
+                    msgEl.innerText = "SPACEキーでサーブ！";
+                    msgEl.className = "mt-2 text-yellow-400 font-bold text-sm animate-pulse";
+                } else {
+                    msgEl.innerText = "相手のサーブ待ち...";
+                    msgEl.className = "mt-2 text-slate-400 font-bold text-sm";
+                }
+            } else {
+                msgEl.innerText = "";
+            }
+        }
+
+        // --- Physics & Loop ---
+
+        function generateBlocks() {
+            let blocks = [];
+            const startX = 40;
+            const startY = CANVAS_HEIGHT / 2 - 50;
+            const w = (CANVAS_WIDTH - 80) / BLOCK_COLS;
+            const h = 20;
+
+            for (let r = 0; r < BLOCK_ROWS; r++) {
+                for (let c = 0; c < BLOCK_COLS; c++) {
+                    // Leave center empty for ball passage initially
+                    if (r === 2 && c === 2) continue; 
+                    
+                    blocks.push({
+                        x: startX + c * w,
+                        y: startY + r * h,
+                        w: w - 4,
+                        h: h - 4,
+                        active: true
+                    });
+                }
+            }
+            return blocks;
+        }
+
+        function updatePhysics() {
+            // Only Host calculates physics
+            if (!isHost || gameState.status !== 'playing') return;
+            
+            // サーブ待ちなら物理演算しない
+            if (gameState.waitingForServe) return;
+
+            let b = gameState.ball;
+
+            // Movement
+            b.x += b.vx;
+            b.y += b.vy;
+
+            // Walls (Left/Right)
+            if (b.x - BALL_RADIUS < 0) {
+                b.x = BALL_RADIUS;
+                b.vx *= -1;
+            } else if (b.x + BALL_RADIUS > CANVAS_WIDTH) {
+                b.x = CANVAS_WIDTH - BALL_RADIUS;
+                b.vx *= -1;
+            }
+
+            // Paddles
+            // P1 (Bottom)
+            if (b.y + BALL_RADIUS > CANVAS_HEIGHT - 30 && b.y - BALL_RADIUS < CANVAS_HEIGHT - 10) {
+                if (b.x > gameState.p1X - PADDLE_WIDTH/2 && b.x < gameState.p1X + PADDLE_WIDTH/2) {
+                    b.vy = -Math.abs(b.vy);
+                    // Add some english based on hit position
+                    let diff = b.x - gameState.p1X;
+                    b.vx += diff * 0.1; 
+                }
+            }
+            
+            // P2 (Top)
+            if (b.y - BALL_RADIUS < 30 && b.y + BALL_RADIUS > 10) {
+                if (b.x > gameState.p2X - PADDLE_WIDTH/2 && b.x < gameState.p2X + PADDLE_WIDTH/2) {
+                    b.vy = Math.abs(b.vy);
+                    let diff = b.x - gameState.p2X;
+                    b.vx += diff * 0.1;
+                }
+            }
+
+            // Blocks Collision
+            let hitBlock = false;
+            for (let block of gameState.blocks) {
+                if (!block.active) continue;
+                if (b.x > block.x && b.x < block.x + block.w &&
+                    b.y > block.y && b.y < block.y + block.h) {
+                        block.active = false;
+                        // Simple bounce flip - ideally determine side
+                        if (Math.abs(b.x - block.x) < 5 || Math.abs(b.x - (block.x + block.w)) < 5) b.vx *= -1;
+                        else b.vy *= -1;
+                        
+                        hitBlock = true;
+                        
+                        // Increase speed slightly on break
+                        if (Math.abs(b.vx) < 8) b.vx *= 1.05;
+                        if (Math.abs(b.vy) < 8) b.vy *= 1.05;
+                        break; // One block per frame
+                }
+            }
+
+            // Scoring (Top/Bottom Walls)
+            let scored = false;
+            if (b.y > CANVAS_HEIGHT) {
+                // P1 Missed -> P2 Score
+                gameState.scores.p2++;
+                gameState.servingPlayer = 'p1'; // P1が失点したので、P1がサーブ権を得る（チャンス）
+                resetBall();
+                scored = true;
+            } else if (b.y < 0) {
+                // P2 Missed -> P1 Score
+                gameState.scores.p1++;
+                gameState.servingPlayer = 'p2'; // P2が失点したので、P2がサーブ権を得る
+                resetBall();
+                scored = true;
+            }
+
+            // Limit speed
+            const maxSpeed = 10;
+            b.vx = Math.max(Math.min(b.vx, maxSpeed), -maxSpeed);
+            b.vy = Math.max(Math.min(b.vy, maxSpeed), -maxSpeed);
+
+            // Sync Trigger (Host writes to DB)
+            const now = Date.now();
+            // Write more often if event happened, otherwise throttle
+            if (scored || hitBlock || now - lastSyncTime > 100) {
+                syncHostState();
+                lastSyncTime = now;
+            }
+        }
+
+        function resetBall() {
+            gameState.ball.x = CANVAS_WIDTH / 2;
+            gameState.ball.y = CANVAS_HEIGHT / 2;
+            gameState.ball.vx = 0; // 停止
+            gameState.ball.vy = 0;
+            gameState.waitingForServe = true; // サーブ待ち状態へ
+        }
+
+        async function syncHostState() {
+            if (!gameId) return;
+            // Correct path: artifacts/{appId}/public/data/games/{code}
+            const ref = doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId);
+            try {
+                await updateDoc(ref, {
+                    ball: gameState.ball,
+                    p1X: gameState.p1X, // Host paddle
+                    blocks: gameState.blocks,
+                    scores: gameState.scores,
+                    servingPlayer: gameState.servingPlayer,
+                    waitingForServe: gameState.waitingForServe,
+                    lastUpdate: serverTimestamp()
+                });
+            } catch (e) { console.error("Sync host fail", e); }
+        }
+
+        async function syncGuestState() {
+            // Guest only writes their paddle position
+            // Throttled in loop
+            if (!gameId || isHost) return;
+            const now = Date.now();
+            if (now - lastSyncTime > 100) {
+                // Correct path: artifacts/{appId}/public/data/games/{code}
+                const ref = doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId);
+                try {
+                    await updateDoc(ref, {
+                        p2X: gameState.p2X,
+                        lastUpdate: serverTimestamp()
+                    });
+                    lastSyncTime = now;
+                } catch (e) { console.error("Sync guest fail", e); }
+            }
+        }
+
+        function setupInput() {
+            // Mouse
+            window.addEventListener('mousemove', (e) => {
+                if (!canvas) return;
+                const rect = canvas.getBoundingClientRect();
+                // Scale mouse pos to canvas coord
+                const scaleX = CANVAS_WIDTH / rect.width;
+                let x = (e.clientX - rect.left) * scaleX;
+                
+                x = Math.max(PADDLE_WIDTH/2, Math.min(CANVAS_WIDTH - PADDLE_WIDTH/2, x));
+                
+                if (isHost) gameState.p1X = x;
+                else gameState.p2X = x;
+            });
+
+            // Touch
+            window.addEventListener('touchmove', (e) => {
+                e.preventDefault(); // Prevent scroll
+                if (!canvas) return;
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = CANVAS_WIDTH / rect.width;
+                let x = (e.touches[0].clientX - rect.left) * scaleX;
+                
+                x = Math.max(PADDLE_WIDTH/2, Math.min(CANVAS_WIDTH - PADDLE_WIDTH/2, x));
+                
+                if (isHost) gameState.p1X = x;
+                else gameState.p2X = x;
+            }, { passive: false });
+
+            // Keyboard (Space to Serve)
+            window.addEventListener('keydown', async (e) => {
+                if (e.code === 'Space') {
+                    if (gameState.status !== 'playing' || !gameState.waitingForServe) return;
+                    
+                    const isMyServe = (isHost && gameState.servingPlayer === 'p1') || (!isHost && gameState.servingPlayer === 'p2');
+                    
+                    if (isMyServe) {
+                        // サーブ発射処理
+                        gameState.waitingForServe = false;
+                        
+                        // 初速を与える（サーブ権がある方から相手側へ）
+                        // P1(下)なら上へ(-)、P2(上)なら下へ(+)
+                        const dir = gameState.servingPlayer === 'p1' ? -1 : 1;
+                        gameState.ball.vy = 4 * dir; 
+                        gameState.ball.vx = (Math.random() - 0.5) * 4;
+
+                        if (isHost) {
+                            // ホストなら物理演算がすぐに始まる
+                            syncHostState();
+                        } else {
+                            // ゲストがサーブした場合、DBを直接更新してホストに通知
+                            const ref = doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId);
+                            await updateDoc(ref, {
+                                waitingForServe: false,
+                                ball: gameState.ball, // 決定した初速を送信
+                                lastUpdate: serverTimestamp()
+                            });
+                        }
+                    }
+                }
+            });
+        }
+
+        function gameLoop() {
+            // Physics
+            updatePhysics();
+            
+            // Guest sync loop
+            if (!isHost && gameState.status === 'playing') {
+                syncGuestState();
+            }
+
+            // Draw
+            draw();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function draw() {
+            // Background
+            ctx.fillStyle = '#1e293b'; // Slate 800
+            ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+            // Grid lines (retro feel)
+            ctx.strokeStyle = '#334155';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(0, CANVAS_HEIGHT/2);
+            ctx.lineTo(CANVAS_WIDTH, CANVAS_HEIGHT/2);
+            ctx.stroke();
+
+            // Blocks
+            if (gameState.blocks) {
+                gameState.blocks.forEach(b => {
+                    if (b.active) {
+                        ctx.fillStyle = '#f472b6'; // Pink 400
+                        ctx.shadowBlur = 10;
+                        ctx.shadowColor = '#f472b6';
+                        ctx.fillRect(b.x, b.y, b.w, b.h);
+                        ctx.shadowBlur = 0;
+                    }
+                });
+            }
+
+            // Paddle 1 (Host - Bottom)
+            ctx.fillStyle = '#22d3ee'; // Cyan 400
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#22d3ee';
+            ctx.fillRect(gameState.p1X - PADDLE_WIDTH/2, CANVAS_HEIGHT - 20, PADDLE_WIDTH, PADDLE_HEIGHT);
+            
+            // Paddle 2 (Guest - Top)
+            ctx.fillStyle = '#c084fc'; // Purple 400
+            ctx.shadowColor = '#c084fc';
+            ctx.fillRect(gameState.p2X - PADDLE_WIDTH/2, 20 - PADDLE_HEIGHT, PADDLE_WIDTH, PADDLE_HEIGHT);
+            ctx.shadowBlur = 0;
+
+            // Ball
+            ctx.beginPath();
+            ctx.arc(gameState.ball.x, gameState.ball.y, BALL_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            ctx.closePath();
+            
+            // Glow for ball
+            ctx.beginPath();
+            ctx.arc(gameState.ball.x, gameState.ball.y, BALL_RADIUS * 2, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.fill();
+            ctx.closePath();
+
+            // Waiting for Serve Indicator on Canvas
+            if (gameState.waitingForServe) {
+                ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
+                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                
+                ctx.fillStyle = "#fbbf24"; // Amber 400
+                ctx.font = "20px monospace";
+                ctx.textAlign = "center";
+                
+                const isMyServe = (isHost && gameState.servingPlayer === 'p1') || (!isHost && gameState.servingPlayer === 'p2');
+                if (isMyServe) {
+                    ctx.fillText("PRESS SPACE TO SERVE", CANVAS_WIDTH/2, CANVAS_HEIGHT/2 + (gameState.servingPlayer === 'p1' ? 40 : -30));
+                }
+            }
+        }
+
+        // --- UI Helpers ---
+
+        function switchScreen(screen) {
+            document.getElementById('menu-screen').classList.add('hidden');
+            document.getElementById('waiting-screen').classList.add('hidden');
+            document.getElementById('result-screen').classList.add('hidden');
+            document.getElementById('gameCanvas').classList.add('hidden');
+            document.getElementById('game-hud').classList.add('hidden');
+
+            if (screen === 'menu') {
+                document.getElementById('menu-screen').classList.remove('hidden');
+            } else if (screen === 'waiting') {
+                document.getElementById('waiting-screen').classList.remove('hidden');
+            } else if (screen === 'playing') {
+                document.getElementById('gameCanvas').classList.remove('hidden');
+                document.getElementById('game-hud').classList.remove('hidden');
+                gameState.status = 'playing';
+            } else if (screen === 'result') {
+                document.getElementById('result-screen').classList.remove('hidden');
+            }
+        }
+
+        window.copyRoomId = () => {
+            const text = document.getElementById('room-id-display').innerText;
+            // Hack for clipboard inside iframe/sandbox if needed, though simple logic usually works
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textArea);
+            alert('IDをコピーしました: ' + text);
+        };
+
+        function endGame(winnerRole) {
+            gameState.status = 'finished';
+            const iAmP1 = isHost;
+            const iAmWinner = (winnerRole === 'Host' && iAmP1) || (winnerRole === 'Guest' && !iAmP1);
+            
+            document.getElementById('result-title').innerText = iAmWinner ? "YOU WIN!" : "YOU LOSE";
+            document.getElementById('result-title').className = iAmWinner ? "text-4xl font-bold mb-4 text-yellow-400" : "text-4xl font-bold mb-4 text-slate-400";
+            document.getElementById('result-message').innerText = `${gameState.scores.p1} - ${gameState.scores.p2}`;
+            
+            switchScreen('result');
+            
+            if (isHost && gameId) {
+                // Cleanup eventually (optional in this flow, usually keep for record or explicit delete)
+                // deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', `games_${gameId}`));
+            }
+        }
+
+        window.resetGame = () => {
+            if (unsubscribeGame) unsubscribeGame();
+            gameId = null;
+            isHost = false;
+            gameState.scores = { p1: 0, p2: 0 };
+            gameState.ball = { x: CANVAS_WIDTH/2, y: CANVAS_HEIGHT/2, vx: 0, vy: 0 };
+            switchScreen('menu');
+        };
+        
+        // Start
+        init();
+    </script>
+</body>
+</html>
