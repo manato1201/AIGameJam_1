@@ -1,0 +1,3 @@
+マリオギャラクシーを作ってください
+
+コード実行時に発生したエラー（THREE.CapsuleGeometry is not a constructor）の修正依頼
